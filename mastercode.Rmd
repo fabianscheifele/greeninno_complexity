@@ -1,0 +1,95 @@
+---
+title: "master_greenpat_complexity"
+author: "Fabian Scheifele"
+date: "29 4 2022"
+output: html_document
+---
+
+
+```{r}
+memory.limit(size = NA)
+if(!require(install.load)){
+  install.packages("install.load")
+  library(install.load)
+}
+suppressMessages(install_load("tidyverse", "dplyr", "ggplot2", "readr", "readxl","knitr","here", "tidyverse" , "anytime" , "data.table", "corrplot", "naniar", "fuzzyjoin","expss"))
+```
+
+1. Import data 
+```{r}
+y2_raw<-read_csv(here("data","Y02_v07.csv"), locale=locale(encoding = "latin1"))
+
+y2_raw<-y2_raw%>%rename(row_no=...1)
+
+
+```
+
+2. Clean data
+```{r}
+#make columns lower case
+names(y2_raw) <- tolower(names(y2_raw))
+
+# add labels to remaining variables
+y2_raw<- apply_labels(y2_raw,
+                      row_no = "Row number as imported",
+                      person_id = "patstat person ID",
+                      person_name = "Name of the Applicant or Inventor",
+                      person_adress = "All address elements of the person apart from the country",
+                      nuts = "NUTS code as defined by Eurostat",
+                      nuts_level = "Indicates the level of the regionalisation code in attribute NUTS, 0=state",
+                      doc_std_name_id = "ID for the DOCDB standardised name",
+                      doc_std_name = "Standardised name as recorded in DOCDB",
+                      psn_id = "ID for the PATSTAT Standardised Name",
+                      psn_level="Harmonisation level of PATSTAT standardised name",
+                      psn_level=c("No harmisation"=0, "Automated harmonisation"=1, "Automated plus manual refinement"=2),
+                      han_id="ID of a Harmonised Applicant Name (HAN) from OECD",
+                      han_name="Harmonised Applicant Name (HAN) from OECD",
+                      han_harmonized="Harmonisation indicator for OECD HAN",
+                      han_harmonized=c("replinished with original name"=0, "harmonized, but not matched with orbis"=1, "harmonized and matched"=2),
+                      earliest_publn_year="Year of the earliest publication date of an application", 
+                      docdb_family_size="family size, 1 means application is only family member"
+)
+
+
+#make all string variables to lower case
+y2_raw <- y2_raw %>%
+  mutate(across(where(is.character), tolower))
+
+
+#Code factor variables
+y2_raw$granted<- ifelse(y2_raw$granted=='y',1,0)
+
+```
+
+3. Replacing missing nationality data (NUTS)
+```{r}
+#Check out missing data 
+missing_country<-y2_raw%>%filter(is.na(nuts))
+country_complete<-y2_raw%>%filter(!is.na(nuts))
+
+#merging based on person_id (nothing found)
+person_id_found<-missing_country%>%inner_join(country_complete, by=c("person_id"))
+
+#perform fuzzy matching left join(https://www.statology.org/fuzzy-matching-in-r/)
+missing_country<-y2_raw%>%filter(is.na(nuts))%>%select(person_name)
+country_complete<-y2_raw%>%filter(!is.na(nuts))%>%select(person_name)
+
+fuzzy_name<-stringdist_join(missing_country, country_complete, 
+                by='person_name', #match based on team
+                mode='left', #use left join
+                method = "jw", #use jw distance metric
+                max_dist=0.1, 
+                distance_col='dist') %>%
+  group_by(person_name.x) %>%
+  slice_min(order_by=dist, n=1)
+
+```
+
+
+
+
+```{r}
+y2_subset<-y2_raw%>%select("row_no","PERSON_ID", "PERSON_NAME", "PERSON_CTRY_CODE","APPLN_ID","NUTS","DOCDB_FAMILY_ID", "DOCDB_FAMILY_SIZE", "CPC_CLASS_SYMBOL")
+
+```
+
