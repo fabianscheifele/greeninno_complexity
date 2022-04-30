@@ -12,7 +12,7 @@ if(!require(install.load)){
   install.packages("install.load")
   library(install.load)
 }
-suppressMessages(install_load("tidyverse", "dplyr", "ggplot2", "readr", "readxl","knitr","here", "tidyverse" , "anytime" , "data.table", "corrplot", "naniar", "fuzzyjoin","expss"))
+suppressMessages(install_load("tidyverse", "dplyr", "ggplot2", "readr", "readxl","knitr","here", "tidyverse" , "anytime" , "data.table", "corrplot", "naniar", "fuzzyjoin","expss", "janitor"))
 ```
 
 1. Import data 
@@ -70,26 +70,87 @@ country_complete<-y2_raw%>%filter(!is.na(nuts))
 #merging based on person_id (nothing found)
 person_id_found<-missing_country%>%inner_join(country_complete, by=c("person_id"))
 
-#perform fuzzy matching left join(https://www.statology.org/fuzzy-matching-in-r/)
-missing_country<-y2_raw%>%filter(is.na(nuts))%>%select(person_name)
-country_complete<-y2_raw%>%filter(!is.na(nuts))%>%select(person_name)
 
-fuzzy_name<-stringdist_join(missing_country, country_complete, 
+```
+
+4. Seperate raw into applicant and inventor file
+```{r}
+#Seperating applicants
+applicants<-y2_raw%>%filter(applt_seq_nr==1)
+applicants_nocountry<-applicants%>%filter(is.na(nuts))
+  #12,58% NA's for applicant residence
+
+
+#Seperating inventors
+inventors<-y2_raw%>%filter(invt_seq_nr>0)%>%
+  arrange(docdb_family_id, appln_id)%>%
+  select(docdb_family_id,nuts,cpc_class_symbol, earliest_filing_year)
+inventors_nocountry<-inventors%>%filter(is.na(nuts))
+  #15% NA's for inventor residence
+
+#Testing for number of unique CPC codes
+cpc_inventor<-inventors %>%
+  group_by(docdb_family_id) %>%
+  mutate(unique_cpc = n_distinct(cpc_class_symbol))
+summary(cpc_inventor$unique_cpc)
+
+cpc_applicant<-applicants %>%
+  group_by(docdb_family_id) %>%
+  mutate(unique_cpc = n_distinct(cpc_class_symbol))
+summary(cpc_applicant$unique_cpc)
+  #Only one CPC code per family_id--> weird
+
+```
+
+5. Creating final count datasets
+```{r}
+#Counting number of inventors and cpc codes per family_id
+inventors<-inventors%>%group_by(docdb_family_id)%>%
+  mutate(no_inventors=n())
+inventors<-inventors%>%group_by(docdb_family_id)%>%
+  mutate(no_cpc=n_distinct(cpc_class_symbol))
+
+#creating fractional count variable
+inventors<-inventors%>%mutate(frac_count=1/(no_cpc*no_inventors))
+
+#Grouping the data by nationality
+inventor_final<-inventors%>%group_by(nuts, cpc_class_symbol, earliest_filing_year)%>%
+  summarize(frac_pat_count=sum(frac_count))
+inventor_final<-inventor_final%>%arrange(nuts,earliest_filing_year, cpc_class_symbol)
+
+#remove NA's
+inventor_final<-inventor_final%>%filter(!is.na(nuts))
+
+#Calculate RCA
+inventor_final<-inventor_final%>%
+  group_by(nuts, earliest_filing_year)%>%
+  mutate(rta_nom=frac_pat_count/sum(frac_pat_count))%>%
+  ungroup%>%
+  group_by(earliest_filing_year, cpc_class_symbol)%>%
+  mutate(rta_denom=frac_pat_count/sum(frac_pat_count))%>%
+  ungroup%>%
+  mutate(rta=rta_nom/rta_denom)
+
+```
+
+
+Archive
+```{r}
+y2_subset<-y2_raw%>%select("row_no","PERSON_ID", "PERSON_NAME", "PERSON_CTRY_CODE","APPLN_ID","NUTS","DOCDB_FAMILY_ID", "DOCDB_FAMILY_SIZE", "CPC_CLASS_SYMBOL")
+
+#perform fuzzy matching left join(https://www.statology.org/fuzzy-matching-in-r/)
+#missing_country<-y2_raw%>%filter(is.na(nuts))%>%select(person_name)
+#country_complete<-y2_raw%>%filter(!is.na(nuts))%>%select(person_name)
+
+#fuzzy_name<-stringdist_join(missing_country, country_complete, 
                 by='person_name', #match based on team
                 mode='left', #use left join
                 method = "jw", #use jw distance metric
                 max_dist=0.1, 
                 distance_col='dist') %>%
-  group_by(person_name.x) %>%
-  slice_min(order_by=dist, n=1)
+ # group_by(person_name.x) %>%
+#  slice_min(order_by=dist, n=1)
 
-```
-
-
-
-
-```{r}
-y2_subset<-y2_raw%>%select("row_no","PERSON_ID", "PERSON_NAME", "PERSON_CTRY_CODE","APPLN_ID","NUTS","DOCDB_FAMILY_ID", "DOCDB_FAMILY_SIZE", "CPC_CLASS_SYMBOL")
 
 ```
 
