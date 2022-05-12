@@ -17,9 +17,12 @@ suppressMessages(install_load("tidyverse", "dplyr", "ggplot2", "readr", "readxl"
 
 1. Import data 
 ```{r}
-y2_raw<-read_csv(here("data","Y02_v07.csv"), locale=locale(encoding = "latin1"))
+y2_raw<-read_csv(here("data","Y02_v07_new.csv"), locale=locale(encoding = "latin1"))
+#2373038 rows compared to 1521030 in previous dataset means only 1.56 IPC codes per patent application, not a lot?
 
 y2_raw<-y2_raw%>%rename(row_no=...1)
+y2_raw<-y2_raw%>%rename(application_number=X.2)
+
 
 
 ```
@@ -32,9 +35,11 @@ names(y2_raw) <- tolower(names(y2_raw))
 # add labels to remaining variables
 y2_raw<- apply_labels(y2_raw,
                       row_no = "Row number as imported",
+                      application_number = "applications, numbered as imported",                       appln_id = "patstat application ID", 
+                      appln_auth = "Patent Office",
                       person_id = "patstat person ID",
                       person_name = "Name of the Applicant or Inventor",
-                      person_adress = "All address elements of the person apart from the country",
+                      person_address = "All address elements of the person apart from the country",
                       nuts = "NUTS code as defined by Eurostat",
                       nuts_level = "Indicates the level of the regionalisation code in attribute NUTS, 0=state",
                       doc_std_name_id = "ID for the DOCDB standardised name",
@@ -47,7 +52,9 @@ y2_raw<- apply_labels(y2_raw,
                       han_harmonized="Harmonisation indicator for OECD HAN",
                       han_harmonized=c("replinished with original name"=0, "harmonized, but not matched with orbis"=1, "harmonized and matched"=2),
                       earliest_publn_year="Year of the earliest publication date of an application", 
-                      docdb_family_size="family size, 1 means application is only family member"
+                      earliest_filing_year= "Year of earliest application filing",
+                      docdb_family_size="family size, 1 means application is only family member", 
+                      docdb_family_id ="ID of patent family"
 )
 
 
@@ -61,19 +68,8 @@ y2_raw$granted<- ifelse(y2_raw$granted=='y',1,0)
 
 ```
 
-3. Replacing missing nationality data (NUTS)
-```{r}
-#Check out missing data 
-missing_country<-y2_raw%>%filter(is.na(nuts))
-country_complete<-y2_raw%>%filter(!is.na(nuts))
 
-#merging based on person_id (nothing found)
-person_id_found<-missing_country%>%inner_join(country_complete, by=c("person_id"))
-
-
-```
-
-4. Seperate raw into applicant and inventor file
+3. Seperate raw data into applicant and inventor file
 ```{r}
 #Seperating applicants
 applicants<-y2_raw%>%filter(applt_seq_nr==1)
@@ -100,6 +96,50 @@ cpc_applicant<-applicants %>%
 summary(cpc_applicant$unique_cpc)
   #Only one CPC code per family_id--> weird
 
+#Testing for number of unique CPC codes
+cpc<-y2_raw %>%
+  group_by(docdb_family_id) %>%
+  mutate(unique_cpcs_family = n_distinct(cpc_class_symbol))%>%
+  ungroup()%>%
+  group_by(appln_id) %>%
+  mutate(unique_cpcs_appln = n_distinct(cpc_class_symbol))%>%
+  select(appln_id, docdb_family_id, nuts_new, unique_cpcs_family, unique_cpcs_appln)
+
+cpc%>%filter(unique_cpcs_appln!=unique_cpcs_family)
+#there seem to be no differences between the number of unique CPC codes in invidiual applications and the overall family
+```
+
+4. Replace residence of inventor, applicant (NUTS) with Methods from de Rassenfosse (2013)
+```{r}
+#Check out missing data 
+missing_country<-y2_raw%>%filter(is.na(nuts))
+country_complete<-y2_raw%>%filter(!is.na(nuts))
+
+#merging based on person_id (nothing found)
+person_id_found<-missing_country%>%inner_join(country_complete, by=c("person_id"))
+
+#merging based on person_id (nothing found)
+han_id_found<-missing_country%>%inner_join(country_complete, by=c("han_name"))
+
+#merging based on psn_id (too large to match)
+#psn_id_found<-missing_country%>%inner_join(country_complete, by=c("psn_name"))
+
+#Source 4: Use country of residence of the applicant, as indicated in the priority document, to proxy the country of the inventor
+
+
+
+#Source 7: Following the method described in De Rassenfosse (2013), we replace Where available,  missing nationality with Patent Office (better would be priority patent office)
+y2_raw<-y2_raw%>%mutate(nuts_new=if_else(is.na(nuts), appln_auth, nuts))
+replaced<-y2_raw%>%filter(is.na(nuts))%>%select(appln_auth, nuts, nuts_new)
+
+#Remove replaced values, where patent office is regional
+`%notin%` <- Negate(`%in%`)
+y2_raw<-y2_raw%>%filter(nuts_new %notin% c("ep", "wo", "ap", "em","bx", "ea", "gc", "ib", "oa", "qz", "xn", "xu", "xv"))
+
+#Create dummy for replaced nationality values
+y2_raw<-y2_raw%>%mutate(nat_replaced=if_else(nuts_new==nuts,0,1,missing = 1))
+replaced<-y2_raw%>%filter(is.na(nuts))%>%select(appln_auth, nuts, nuts_new,nat_replaced)
+mean(y2_raw$nat_replaced)
 ```
 
 5. Creating final count datasets
@@ -134,7 +174,7 @@ inventor_final<-inventor_final%>%
 ```
 
 
-Archive
+Archived code
 ```{r}
 y2_subset<-y2_raw%>%select("row_no","PERSON_ID", "PERSON_NAME", "PERSON_CTRY_CODE","APPLN_ID","NUTS","DOCDB_FAMILY_ID", "DOCDB_FAMILY_SIZE", "CPC_CLASS_SYMBOL")
 
@@ -150,7 +190,5 @@ y2_subset<-y2_raw%>%select("row_no","PERSON_ID", "PERSON_NAME", "PERSON_CTRY_COD
                 distance_col='dist') %>%
  # group_by(person_name.x) %>%
 #  slice_min(order_by=dist, n=1)
-
-
 ```
 
