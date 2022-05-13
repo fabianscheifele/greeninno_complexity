@@ -23,8 +23,8 @@ y2_raw<-read_csv(here("data","Y02_v07_new.csv"), locale=locale(encoding = "latin
 y2_raw<-y2_raw%>%rename(row_no=...1)
 y2_raw<-y2_raw%>%rename(application_number=X.2)
 
-
-
+countries<-as.data.frame(unique(y2_raw$NUTS))
+#182 different countries
 ```
 
 2. Clean data
