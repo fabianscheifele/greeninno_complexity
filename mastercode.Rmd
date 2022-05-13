@@ -12,19 +12,22 @@ if(!require(install.load)){
   install.packages("install.load")
   library(install.load)
 }
-suppressMessages(install_load("tidyverse", "dplyr", "ggplot2", "readr", "readxl","knitr","here", "tidyverse" , "anytime" , "data.table", "corrplot", "naniar", "fuzzyjoin","expss", "janitor"))
+suppressMessages(install_load("tidyverse", "dplyr", "ggplot2", "readr", "readxl","knitr","here", "tidyverse" , "anytime" , "data.table", "corrplot", "naniar", "fuzzyjoin","expss", "janitor","readr", "data.table", "labelled"))
 ```
 
 1. Import data 
 ```{r}
-y2_raw<-read_csv(here("data","Y02_v07_new.csv"), locale=locale(encoding = "latin1"))
+y2_raw<-fread(here("data","Y02_v07_new.csv"))
+#, locale=locale(encoding = "latin1"))
 #2373038 rows compared to 1521030 in previous dataset means only 1.56 IPC codes per patent application, not a lot?
 
-y2_raw<-y2_raw%>%rename(row_no=...1)
+y2_raw<-y2_raw%>%rename(row_no=V1)
 y2_raw<-y2_raw%>%rename(application_number=X.2)
 
-countries<-as.data.frame(unique(y2_raw$NUTS))
+#countries<-as.data.frame(unique(y2_raw$NUTS))
 #182 different countries
+
+inv_country<-fread(here("data","ctry_inv_person.txt"))
 ```
 
 2. Clean data
@@ -113,6 +116,8 @@ cpc%>%filter(unique_cpcs_appln!=unique_cpcs_family)
 ```{r}
 #Check out missing data 
 missing_country<-y2_raw%>%filter(is.na(nuts))
+#4.1% missing country data#
+
 country_complete<-y2_raw%>%filter(!is.na(nuts))
 
 #merging based on person_id (nothing found)
@@ -141,6 +146,20 @@ y2_raw<-y2_raw%>%mutate(nat_replaced=if_else(nuts_new==nuts,0,1,missing = 1))
 replaced<-y2_raw%>%filter(is.na(nuts))%>%select(appln_auth, nuts, nuts_new,nat_replaced)
 mean(y2_raw$nat_replaced)
 ```
+
+
+```{r}
+inv_country2<-inv_country%>%select(appln_id, ctry_code)
+inv_country2<- apply_labels(inv_country2,
+                      appln_id = "PATSTAT Applicant id")
+missing_country$appln_id<-as.integer(missing_country$appln_id)
+missing_country<-remove_labels(missing_country)
+inv_country2$appln_id<-remove_labels(inv_country2$appln_id)
+country_found<-missing_country%>%inner_join(inv_country2, by=c("appln_id"))
+```
+
+
+
 
 5. Creating final count datasets
 ```{r}
