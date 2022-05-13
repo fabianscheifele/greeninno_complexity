@@ -149,13 +149,17 @@ mean(y2_raw$nat_replaced)
 
 
 ```{r}
-inv_country2<-inv_country%>%select(appln_id, ctry_code)
+inv_country2<-inv_country%>%select(appln_id, person_id, patent_office, priority_year,ctry_code)
 inv_country2<- apply_labels(inv_country2,
                       appln_id = "PATSTAT Applicant id")
 missing_country$appln_id<-as.integer(missing_country$appln_id)
 missing_country<-remove_labels(missing_country)
 inv_country2$appln_id<-remove_labels(inv_country2$appln_id)
 country_found<-missing_country%>%inner_join(inv_country2, by=c("appln_id"))
+compare<-country_found%>%select(appln_id, appln_auth,patent_office, earliest_filing_year,priority_year, person_id.x, person_id.y,ctry_code)
+
+test<-country_found%>%inner_join(country_complete, by=c("appln_id"))
+test2<-test%>%select(person_id.x,person_id.y, person_id, person_name.x, person_name.y, ctry_code, nuts.x, nuts.y)
 ```
 
 
