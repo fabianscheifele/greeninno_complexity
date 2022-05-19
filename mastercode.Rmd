@@ -7,38 +7,45 @@ output: html_document
 
 
 ```{r}
-memory.limit(size = NA)
+suppressMessages(memory.limit(size = NA))
+
 if(!require(install.load)){
   install.packages("install.load")
   library(install.load)
 }
-suppressMessages(install_load("tidyverse", "dplyr", "ggplot2", "readr", "readxl","knitr","here", "tidyverse" , "anytime" , "data.table", "corrplot", "naniar", "fuzzyjoin","expss", "janitor","readr", "data.table", "labelled"))
+suppressMessages(install_load("tidyverse", "dplyr", "ggplot2", "readr", "readxl","knitr","here", "tidyverse" , "anytime" , "data.table", "corrplot", "naniar", "fuzzyjoin","expss", "janitor","readr", "data.table", "labelled", "countrycode"))
+
+`%notin%` <- Negate(`%in%`)
 ```
 
 1. Import data 
 ```{r}
-y2_raw<-fread(here("data","Y02_v07_new.csv"))
-#, locale=locale(encoding = "latin1"))
+y2_raw<-read_csv(here("data","Y02_v07_new.csv"), locale=locale(encoding = "latin1"))
 #2373038 rows compared to 1521030 in previous dataset means only 1.56 IPC codes per patent application, not a lot?
 
-y2_raw<-y2_raw%>%rename(row_no=V1)
+#Rename some variables
+y2_raw<-y2_raw%>%rename(row_no=...1)
 y2_raw<-y2_raw%>%rename(application_number=X.2)
+y2_raw<-y2_raw%>%rename(cpc=CPC_CLASS_SYMBOL)
 
-#countries<-as.data.frame(unique(y2_raw$NUTS))
+
+countries_unique<-unique(y2_raw$NUTS)
 #182 different countries
 
-inv_country<-fread(here("data","ctry_inv_person.txt"))
+#inv_country<-fread(here("data","ctry_inv_person.txt"))
 ```
 
 2. Clean data
 ```{r}
 #make columns lower case
 names(y2_raw) <- tolower(names(y2_raw))
+#remove spaces in CPC codes for matching with descriptions
+y2_raw<-y2_raw%>%mutate(cpc=str_replace(cpc," ",""))
 
 # add labels to remaining variables
 y2_raw<- apply_labels(y2_raw,
                       row_no = "Row number as imported",
-                      application_number = "applications, numbered as imported",                       appln_id = "patstat application ID", 
+                      application_number = "applications, numbered as imported",appln_id = "patstat application ID", 
                       appln_auth = "Patent Office",
                       person_id = "patstat person ID",
                       person_name = "Name of the Applicant or Inventor",
@@ -83,29 +90,29 @@ applicants_nocountry<-applicants%>%filter(is.na(nuts))
 #Seperating inventors
 inventors<-y2_raw%>%filter(invt_seq_nr>0)%>%
   arrange(docdb_family_id, appln_id)%>%
-  select(docdb_family_id,nuts,cpc_class_symbol, earliest_filing_year)
+  select(docdb_family_id,nuts,cpc, earliest_filing_year)
 inventors_nocountry<-inventors%>%filter(is.na(nuts))
   #15% NA's for inventor residence
 
 #Testing for number of unique CPC codes
 cpc_inventor<-inventors %>%
   group_by(docdb_family_id) %>%
-  mutate(unique_cpc = n_distinct(cpc_class_symbol))
+  mutate(unique_cpc = n_distinct(cpc))
 summary(cpc_inventor$unique_cpc)
 
 cpc_applicant<-applicants %>%
   group_by(docdb_family_id) %>%
-  mutate(unique_cpc = n_distinct(cpc_class_symbol))
+  mutate(unique_cpc = n_distinct(cpc))
 summary(cpc_applicant$unique_cpc)
   #Only one CPC code per family_id--> weird
 
 #Testing for number of unique CPC codes
 cpc<-y2_raw %>%
   group_by(docdb_family_id) %>%
-  mutate(unique_cpcs_family = n_distinct(cpc_class_symbol))%>%
+  mutate(unique_cpcs_family = n_distinct(cpc))%>%
   ungroup()%>%
   group_by(appln_id) %>%
-  mutate(unique_cpcs_appln = n_distinct(cpc_class_symbol))%>%
+  mutate(unique_cpcs_appln = n_distinct(cpc))%>%
   select(appln_id, docdb_family_id, nuts_new, unique_cpcs_family, unique_cpcs_appln)
 
 cpc%>%filter(unique_cpcs_appln!=unique_cpcs_family)
@@ -116,7 +123,8 @@ cpc%>%filter(unique_cpcs_appln!=unique_cpcs_family)
 ```{r}
 #Check out missing data 
 missing_country<-y2_raw%>%filter(is.na(nuts))
-#4.1% missing country data#
+empty_country<-y2_raw%>%filter(nuts== "")
+#17.2% missing country data#
 
 country_complete<-y2_raw%>%filter(!is.na(nuts))
 
@@ -171,15 +179,15 @@ test2<-test%>%select(person_id.x,person_id.y, person_id, person_name.x, person_n
 inventors<-inventors%>%group_by(docdb_family_id)%>%
   mutate(no_inventors=n())
 inventors<-inventors%>%group_by(docdb_family_id)%>%
-  mutate(no_cpc=n_distinct(cpc_class_symbol))
+  mutate(no_cpc=n_distinct(cpc))
 
 #creating fractional count variable
 inventors<-inventors%>%mutate(frac_count=1/(no_cpc*no_inventors))
 
 #Grouping the data by nationality
-inventor_final<-inventors%>%group_by(nuts, cpc_class_symbol, earliest_filing_year)%>%
+inventor_final<-inventors%>%group_by(nuts, cpc, earliest_filing_year)%>%
   summarize(frac_pat_count=sum(frac_count))
-inventor_final<-inventor_final%>%arrange(nuts,earliest_filing_year, cpc_class_symbol)
+inventor_final<-inventor_final%>%arrange(nuts,earliest_filing_year, cpc)
 
 #remove NA's
 inventor_final<-inventor_final%>%filter(!is.na(nuts))
@@ -189,7 +197,7 @@ inventor_final<-inventor_final%>%
   group_by(nuts, earliest_filing_year)%>%
   mutate(rta_nom=frac_pat_count/sum(frac_pat_count))%>%
   ungroup%>%
-  group_by(earliest_filing_year, cpc_class_symbol)%>%
+  group_by(earliest_filing_year, cpc)%>%
   mutate(rta_denom=frac_pat_count/sum(frac_pat_count))%>%
   ungroup%>%
   mutate(rta=rta_nom/rta_denom)
@@ -197,21 +205,96 @@ inventor_final<-inventor_final%>%
 ```
 
 
-Archived code
+6. Fractional count by appln_id
 ```{r}
-y2_subset<-y2_raw%>%select("row_no","PERSON_ID", "PERSON_NAME", "PERSON_CTRY_CODE","APPLN_ID","NUTS","DOCDB_FAMILY_ID", "DOCDB_FAMILY_SIZE", "CPC_CLASS_SYMBOL")
+#remove NA's
+inventor_final<-y2_raw%>%filter(!is.na(nuts))%>%select(nuts,appln_id,person_id, earliest_filing_year, cpc)
 
-#perform fuzzy matching left join(https://www.statology.org/fuzzy-matching-in-r/)
-#missing_country<-y2_raw%>%filter(is.na(nuts))%>%select(person_name)
-#country_complete<-y2_raw%>%filter(!is.na(nuts))%>%select(person_name)
+#Create fractional count (each person-CPC combination is one row)
+inventor_final<-inventor_final%>%group_by(appln_id)%>%mutate(frac=1/n())
 
-#fuzzy_name<-stringdist_join(missing_country, country_complete, 
-                by='person_name', #match based on team
-                mode='left', #use left join
-                method = "jw", #use jw distance metric
-                max_dist=0.1, 
-                distance_col='dist') %>%
- # group_by(person_name.x) %>%
-#  slice_min(order_by=dist, n=1)
+#test to show that person-cpc combination is indeed one row
+#test<-inventor_final%>%filter(appln_id==488313783)%>%arrange(person_id)
+
+nationality<-as.data.frame(unique(inventor_final$nuts))
+
+
+#Calculate Patent Counts
+pat_count<-inventor_final%>%
+  group_by(nuts, earliest_filing_year, cpc)%>%summarize(pat_count=sum(frac))
+
+
+pat_count<-pat_count%>%group_by(nuts,earliest_filing_year)%>%mutate(sum_country=sum(pat_count))%>%
+  ungroup()%>%
+  group_by(cpc, earliest_filing_year)%>%
+  mutate(sum_cpc=sum(pat_count))%>%
+  ungroup()%>%
+  group_by(earliest_filing_year)%>%mutate(sum_year=sum(pat_count))%>%
+  ungroup()%>%
+  mutate(rta=(pat_count/sum_country)/(sum_cpc/sum_year))
+
+#Merge CPC descriptions to data#
+cpc_test<-read_excel(here("data","cpc_description.xlsx"), col_names = TRUE)
+cpc_test$CPC<-str_squish(cpc_test$CPC)
+names(cpc_test) <- tolower(names(cpc_test))
+cpc_test <- cpc_test %>%
+  mutate(across(where(is.character), tolower))
+
+pat_count<-left_join(pat_count, cpc_test, by=c("cpc"="cpc"))
+
+#merge countrycodes to data
+country_codes<-read_excel(here("data","wipo_codes.xlsx"))
+country_codes$nuts <-tolower(country_codes$nuts)
+pat_count$nuts<-as.character(pat_count$nuts)
+pat_count<-left_join(pat_count,country_codes, by=c("nuts"))
+```
+
+Descriptive Statistics on the data
+```{r}
+#top_cpc codes
+top_cpc<-pat_count%>%group_by(cpc)%>%
+  summarize(count=sum(pat_count))
+top_cpc<-left_join(x=top_cpc, y=cpc_test, by="cpc")%>%arrange(desc(count))
+
+#main countries
+top_countries<-pat_count%>%group_by(nuts)%>%
+  summarize(count=sum(pat_count))%>%arrange(desc(count))
+top_countries<-left_join(top_countries,country_codes, by=c("nuts"))
+
+#12 country country codes not present in https://www.uspto.gov/patents/apply/applying-online/country-codes-wipo-st3-table#heading-2
+no_countryname<-top_countries%>%filter(is.na(country))
+```
+
+Alternative read in of data with fread
+```{r}
+y2_raw_fread<-fread(here("data","Y02_v07_new.csv"), header = T, sep = ",",na.strings = c("",NA),data.table=F, stringsAsFactors = FALSE, fill = FALSE, strip.white = TRUE)
+
+countries_fread<-as.data.frame(unique(y2_raw_fread$NUTS))
+
+#remove NA's
+inventor_final2<-y2_raw_fread%>%filter(!is.na(nuts))%>%select(nuts,appln_id,person_id, earliest_filing_year, cpc)
+
+#Create fractional count (each person-CPC combination is one row)
+inventor_final2<-inventor_final2%>%group_by(appln_id)%>%mutate(frac=1/n())
+
+#test to show that person-cpc combination is indeed one row
+#test<-inventor_final%>%filter(appln_id==488313783)%>%arrange(person_id)
+
+nationality<-as.data.frame(unique(inventor_final2$nuts))
+
+
+#Calculate Patent Counts
+pat_count<-inventor_final2%>%
+  group_by(nuts, earliest_filing_year, cpc)%>%summarize(pat_count=sum(frac))
+
+
+pat_count<-pat_count%>%group_by(nuts,earliest_filing_year)%>%mutate(sum_country=sum(pat_count))%>%
+  ungroup()%>%
+  group_by(cpc, earliest_filing_year)%>%
+  mutate(sum_cpc=sum(pat_count))%>%
+  ungroup()%>%
+  group_by(earliest_filing_year)%>%mutate(sum_year=sum(pat_count))%>%
+  ungroup()%>%
+  mutate(rta=(pat_count/sum_country)/(sum_cpc/sum_year))
 ```
 
