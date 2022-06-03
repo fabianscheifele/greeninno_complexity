@@ -1,0 +1,79 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Descriptive Statistics on the data
+```{r}
+#top_cpc codes
+top_cpc<-pat_count%>%group_by(cpc)%>%
+  summarize(count=sum(pat_count))
+top_cpc<-left_join(x=top_cpc, y=cpc_test, by="cpc")%>%arrange(desc(count))
+
+#main countries
+top_countries<-pat_count%>%group_by(nuts)%>%
+  summarize(count=sum(pat_count))%>%arrange(desc(count))
+top_countries<-left_join(top_countries,country_codes, by=c("nuts"))
+
+#12 country country codes not present in https://www.uspto.gov/patents/apply/applying-online/country-codes-wipo-st3-table#heading-2
+no_countryname<-top_countries%>%filter(is.na(country))
+```
+
+Alternative read in of data with fread
+```{r}
+y2_raw_fread<-fread(here("data","Y02_v07_new.csv"), header = T, sep = ",",na.strings = c("",NA),data.table=F, stringsAsFactors = FALSE, fill = FALSE, strip.white = TRUE)
+
+countries_fread<-as.data.frame(unique(y2_raw_fread$NUTS))
+
+#remove NA's
+inventor_final2<-y2_raw_fread%>%filter(!is.na(nuts))%>%select(nuts,appln_id,person_id, earliest_filing_year, cpc)
+
+#Create fractional count (each person-CPC combination is one row)
+inventor_final2<-inventor_final2%>%group_by(appln_id)%>%mutate(frac=1/n())
+
+#test to show that person-cpc combination is indeed one row
+#test<-inventor_final%>%filter(appln_id==488313783)%>%arrange(person_id)
+
+nationality<-as.data.frame(unique(inventor_final2$nuts))
+
+
+#Calculate Patent Counts
+pat_count<-inventor_final2%>%
+  group_by(nuts, earliest_filing_year, cpc)%>%summarize(pat_count=sum(frac))
+
+
+pat_count<-pat_count%>%group_by(nuts,earliest_filing_year)%>%mutate(sum_country=sum(pat_count))%>%
+  ungroup()%>%
+  group_by(cpc, earliest_filing_year)%>%
+  mutate(sum_cpc=sum(pat_count))%>%
+  ungroup()%>%
+  group_by(earliest_filing_year)%>%mutate(sum_year=sum(pat_count))%>%
+  ungroup()%>%
+  mutate(rta=(pat_count/sum_country)/(sum_cpc/sum_year))
+```
+
+
+
+5.Label variables
+```{r}
+# add labels to remaining variables
+y2_raw<- apply_labels(y2_raw,
+                      row_no = "Row number as imported",
+                      appln_id = "patstat application ID", 
+                      appln_auth = "Patent Office",
+                      person_id = "patstat person ID",
+                      person_ctry_code = "Country part of the correspondence address of the person or business",
+                      nuts = "NUTS code as defined by Eurostat",
+                      nuts_level = "Indicates the level of the regionalisation code in attribute NUTS, 0=state",
+                      doc_std_name_id = "ID for the DOCDB standardised name",
+                      psn_id = "ID for the PATSTAT Standardised Name",
+                      han_id="ID of a Harmonised Applicant Name (HAN) from OECD",
+                      han_harmonized="Harmonisation indicator for OECD HAN",
+                      han_harmonized=c("replinished with original name"=0, "harmonized, but not matched with orbis"=1, "harmonized and matched"=2),
+                      earliest_publn_year="Year of the earliest publication date of an application", 
+                      earliest_filing_year= "Year of earliest application filing",
+                      docdb_family_size="family size, 1 means application is only family member", 
+                      docdb_family_id ="ID of patent family"
+)
+```
+

@@ -1,0 +1,106 @@
+---
+title: "Creating count data and descriptives"
+author: "Fabian Scheifele"
+date: "3 6 2022"
+output: html_document
+uses: "y2_final95.rds"
+creates: "y2_count.rds"
+
+---
+
+1. packages
+```{r}
+suppressMessages(memory.limit(size = NA))
+
+if(!require(install.load)){
+  install.packages("install.load")
+  library(install.load)
+}
+suppressMessages(install_load("tidyverse", "dplyr", "ggplot2", "readr", "readxl","knitr","here", "tidyverse" , "anytime" , "data.table", "corrplot", "naniar", "fuzzyjoin","expss", "janitor","readr", "data.table", "labelled", "countrycode"))
+
+`%notin%` <- Negate(`%in%`)
+```
+
+2. import data
+```{r}
+y2_final95_distinct<-readRDS(here("data","intermediate","y2_patentlevel_final_1995.rds"))
+
+```
+
+
+3. Creating fractional count by appln_id for y2_final (with replaced residences)
+```{r}
+#Create fractional count (each person-CPC combination is one row)
+y2_final95_distinct<-y2_final95_distinct%>%
+  group_by(appln_id)%>%
+  mutate(frac=1/n())
+
+#test to show that person-cpc combination is indeed one row
+#test<-inventor_final%>%filter(appln_id==488313783)%>%arrange(person_id)
+
+#Calculate Patent Counts
+pat_count<-y2_final95_distinct%>%
+  group_by(ctry_code_ext, earliest_filing_year, cpc)%>%
+  summarize(pat_count=sum(frac))
+
+#remove white space in between
+pat_count$cpc<-gsub(" ", "", pat_count$cpc, fixed = TRUE)
+
+#Merge CPC descriptions to data#
+cpc_test<-read_excel(here("data","raw","cpc_description.xlsx"), col_names = TRUE)
+pat_count<-left_join(pat_count, cpc_test, by=c("cpc"="CPC"))
+
+#merge countrycodes to data
+country_codes<-read_excel(here("data","wipo_codes.xlsx"))
+country_codes$nuts <-tolower(country_codes$nuts)
+pat_count$nuts<-as.character(pat_count$nuts)
+pat_count<-left_join(pat_count,country_codes, by=c("nuts"))
+```
+
+4.Calculate Revealed Technological advantages
+```{r}
+pat_count<-pat_count%>%group_by(nuts,earliest_filing_year)%>%
+  mutate(sum_country=sum(pat_count))%>%
+  ungroup()%>%
+  group_by(cpc, earliest_filing_year)%>%
+  mutate(sum_cpc=sum(pat_count))%>%
+  ungroup()%>%
+  group_by(earliest_filing_year)%>%mutate(sum_year=sum(pat_count))%>%
+  ungroup()%>%
+  mutate(rta=(pat_count/sum_country)/(sum_cpc/sum_year))
+```
+
+
+
+5. Creating final count datasets
+```{r}
+#Counting number of inventors and cpc codes per family_id
+inventors<-inventors%>%group_by(docdb_family_id)%>%
+  mutate(no_inventors=n())
+inventors<-inventors%>%group_by(docdb_family_id)%>%
+  mutate(no_cpc=n_distinct(cpc))
+
+#creating fractional count variable
+inventors<-inventors%>%mutate(frac_count=1/(no_cpc*no_inventors))
+
+#Grouping the data by nationality
+inventor_final<-inventors%>%group_by(nuts, cpc, earliest_filing_year)%>%
+  summarize(frac_pat_count=sum(frac_count))
+inventor_final<-inventor_final%>%arrange(nuts,earliest_filing_year, cpc)
+
+#remove NA's
+inventor_final<-inventor_final%>%filter(!is.na(nuts))
+
+#Calculate RCA
+inventor_final<-inventor_final%>%
+  group_by(nuts, earliest_filing_year)%>%
+  mutate(rta_nom=frac_pat_count/sum(frac_pat_count))%>%
+  ungroup%>%
+  group_by(earliest_filing_year, cpc)%>%
+  mutate(rta_denom=frac_pat_count/sum(frac_pat_count))%>%
+  ungroup%>%
+  mutate(rta=rta_nom/rta_denom)
+
+```
+
+
