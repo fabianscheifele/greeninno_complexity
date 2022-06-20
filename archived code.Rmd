@@ -77,3 +77,144 @@ y2_raw<- apply_labels(y2_raw,
 )
 ```
 
+
+4a. Recuperate missing residence data via Data from Selinger (not giving results)  
+```{r}
+#Check out missing data 
+missing_country<-y2_raw%>%
+  filter(is.na(person_ctry_code))
+
+length(unique(missing_country$appln_id))/length(unique(y2_raw$appln_id))
+sum(is.na(missing_country$person_id)) 
+#person_id exists for every entry, which means join based on appln_id and person_id
+#possible with Additional Country data from de rassenfosse
+
+#country_complete<-y2_raw%>%filter(!is.na(person_ctry_code))
+
+#Approach 1: Merging with imputed inventor country data from Selinger#
+derassen_data<-fread(here("data","raw","ctry_inv_person.txt"))
+derassen_data<-derassen_data%>%
+  select(person_id, ctry_code)
+
+country_codes<-derassen_data%>%distinct(person_id, ctry_code)
+summary(country_codes$person_id)
+summary(missing_id$person_id)
+length(unique(derassen_data$appln_id))
+#This dataset has 46.57 Million different applications, but unfortunately none of our 4.6 Mio million are available#
+
+missing_country<-left_join(missing_country,derassen_data,
+                           by=c("appln_id","person_id"))
+sum(is.na(missing_country$ctry_code))
+#found zero additional ctry_codes
+
+#Second try: Instead of dual left join, only joining on person id
+
+missing_id<-missing_country%>%select(person_id)%>%distinct(person_id)
+
+missing_id<-left_join(missing_id,country_codes,by=c("person_id"))
+
+sum(is.na(missing_id$ctry_code))
+#Approach does not work, R does not find a single person ID, merging only on applicant ID would bring wrong results
+
+
+```
+
+4b. Using data from priority office to infer residence (NOT DONE)
+```{r}
+#Approach 2: Following the method "Source 7" described in De Rassenfosse (2013), we replace where available,  missing nationality with Priority Patent Office
+
+sum(is.na(y2_raw$earliest_filing_id))
+#earliest filing ID not missing for any entries
+y2_raw<-y2_raw%>%
+  mutate(priority_pat= if_else(appln_id==earliest_filing_id,1,0))
+
+priority_office<-y2_raw%>%
+  filter(priority_pat==1)%>%
+  distinct(earliest_filing_id, appln_auth)
+
+#Merge priority office info to main data
+y2_raw<-left_join(y2_raw, priority_office, by=c("earliest_filing_id"))
+sum(is.na(y2_raw$appln_auth.y))
+#for 5.069 mio entries earliest filing ID is a patent that is not in the Y02 data
+
+y2_raw<-y2_raw%>%
+  rename(priority_off=appln_auth.y)
+
+#c) Important: Replace NA's with Priority office where available
+y2_raw<-y2_raw%>%
+  mutate(ctry_code_ext=if_else(is.na(person_ctry_code),
+                               priority_off,person_ctry_code))
+
+1-(sum(is.na(y2_raw$ctry_code_ext))/sum(is.na(y2_raw$person_ctry_code)))
+#missing data reduced by 83% through priority office replacement
+
+
+#filter out entries with regional priority offices, as residence cannot be inferred from this 
+y2_inter<-y2_raw%>%filter(ctry_code_ext %notin% c("ep", "wo", "ap", "em","bx", "ea", "gc", "ib", "oa", "qz", "xn", "xu", "xv"))
+
+
+#Create dummy for replaced nationality values
+y2_inter<-y2_inter%>%mutate(nat_replaced=if_else(ctry_code_ext==person_ctry_code,0,1,missing = 1))
+
+#Delete remaining entries where residence information still missing
+y2_final<-y2_inter%>%
+  filter(!is.na(ctry_code_ext))
+sum(y2_final$nat_replaced)/length(y2_final$nat_replaced)
+
+```
+
+5. Check out how replacement changes inventor residence counts (NOT DONE)
+```{r}
+#Some statistics to see who is benefiting from replacement
+y2_final%>%filter(nat_replaced==1)%>%
+  group_by(ctry_code_ext)%>%
+  summarize(count=n())%>%
+  arrange(desc(count))
+#China and Japan are primary beneficiary from priority replacement method
+
+y2_final%>%filter(nat_replaced==0)%>%
+  group_by(ctry_code_ext)%>%
+  summarize(count=n())%>%
+  arrange(desc(count))
+#China has 8 times more Patents through priority replacement of residence
+
+y2_final%>%group_by(ctry_code_ext)%>%
+  summarize(share_rep=sum(nat_replaced)/n())%>%
+  arrange(desc(share_rep))
+#In addition to China, replacements affects a lot old sovietic countries, 
+#Brazil, Italy (26%), France (23%)
+
+y2_final%>%group_by(earliest_filing_year)%>%
+  summarize(share_rep=sum(nat_replaced)/n())%>%
+  arrange(desc(share_rep))
+#It mostly affects very old years and very recent years (2021,2020), but also 2019 with 71%
+y2_final%>%group_by(earliest_filing_year)%>%
+  summarize(years=n_distinct(appln_id))%>%
+  arrange(desc(years))
+# I would start with 95% because appears to be start of ascent of Y02 apps
+
+y2_final95<-y2_final%>%filter(earliest_filing_year>=1995)
+y2_final95%>%group_by(earliest_filing_year)%>%
+  summarize(years=n_distinct(appln_id))%>%
+  arrange(desc(years))
+#2021 has very few entries but the reporting lag should be uniformly distributed
+
+#Redoing the exercise with 1995 or later, but picture does not change much
+y2_final95%>%filter(nat_replaced==1)%>%
+  group_by(ctry_code_ext)%>%
+  summarize(count=n())%>%
+  arrange(desc(count))
+
+y2_final95%>%group_by(ctry_code_ext)%>%
+  summarize(share_rep=sum(nat_replaced)/n())%>%
+  arrange(desc(share_rep))
+```
+
+
+7. adding country names to data
+```{r}
+#add country names
+library(countrycode)
+y2_final95$inventor_country<-countrycode(y2_final95$person_ctry_code, origin = 'iso2c', destination = 'country.name')
+
+```
