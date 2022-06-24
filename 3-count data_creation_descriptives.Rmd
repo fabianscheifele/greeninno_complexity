@@ -5,7 +5,8 @@ date: "3 6 2022"
 output: html_document
 uses: "y2_final95.rds"
 creates: "y2_count.rds"
-
+editor_options: 
+  chunk_output_type: console
 ---
 
 1. packages
@@ -16,7 +17,7 @@ if(!require(install.load)){
   install.packages("install.load")
   library(install.load)
 }
-suppressMessages(install_load("tidyverse", "dplyr", "ggplot2", "readr", "readxl","knitr","here", "tidyverse" , "anytime" , "data.table", "corrplot", "naniar", "fuzzyjoin","expss", "janitor","readr", "data.table", "labelled", "countrycode"))
+suppressMessages(install_load("tidyverse", "dplyr", "ggplot2", "readr", "readxl","knitr","here", "tidyverse" , "anytime" , "data.table", "corrplot", "naniar", "fuzzyjoin","expss", "janitor","readr", "data.table", "labelled", "countrycode","grep"))
 
 `%notin%` <- Negate(`%in%`)
 ```
@@ -106,9 +107,108 @@ pat_count<-pat_count%>%group_by(country,earliest_fam_filing_year)%>%
   ungroup()%>%
   mutate(rta=(pat_count/sum_country_year)/(sum_cpc_year/total_pat_year))
 ```
+5. rename for easier use
+```{r}
+pat_count<-rename(pat_count,year=earliest_fam_filing_year)
+```
+
+
+
 5. Some tests on the data
 ```{r}
 pat_count%>%slice_max(rta,n=20)%>%select(country, earliest_fam_filing_year, cpc, rta)
+
+country_year<-pat_count%>%group_by(country, year)%>%
+  summarise(count=sum(pat_count))
+
+#Yearly count shows that patents are dropping in 2020, 2021, so exclude
+pat_count%>%
+  group_by(year)%>%
+  summarise(count=sum(pat_count))%>%
+  ggplot(aes(x=year,y=count))+geom_line()
+
+top_countries<-pat_count%>%
+  group_by(country)%>%
+  summarise(count=sum(pat_count))%>%
+  slice_max(count,n=15)
+
+#plot with top 15 countries
+ggplot(data=top_countries, aes(x=country,y=count))+
+  geom_bar(stat="identity")+ggtitle("15 Countries with most Y02 Patent Families 1995-2021")+geom_text(aes(label=round(count,digits=0)),vjust=-0.4)
+
+#plot with main CPC classes
+pat_count$description<-as.factor(pat_count$description)
+levels(pat_count$description) <- gsub(" ", "\n", levels(pat_count$description))
+pat_count%>%
+  group_by(description)%>%
+  summarise(count=sum(pat_count))%>% 
+  slice_max(count,n=10)%>%
+  ggplot(aes(x=description,y=count))+
+  geom_bar(stat="identity")+ggtitle("IPC codes with most Y02 Patent Families 1995-2021")+geom_text(aes(label=round(count,digits=0)),vjust=-0.4)
+
+
+topcpc<-pat_count%>%
+  group_by(cpc)%>%
+  summarise(count=sum(pat_count))
+
+#CPC codes skewed, some codes with high counts, majority low
+topcpc%>%filter(count<5000)%>%
+  ggplot(aes(x=count))+geom_histogram()
+
+summary(topcpc$count)
+#median is 131 families per count(over the whole period!
+
+length(unique(pat_count$person_ctry_code))
+#205 countries
+
+length(unique(pat_count$cpc))
+#432 different Y02 cpc tags
 ```
 
+
+7. Filter out 2020/2021 and countries and CPC that have been infrequently filed
+```{r}
+#First, create balanced panel with all cpc, year, country combinations
+pat_count_balanced<-pat_count%>%
+  expand(year,cpc,country)
+
+pat_count_balanced_filled<-pat_count%>%right_join(pat_count_balanced)
+
+pat_count_balanced_filled<-pat_count_balanced_filled%>%
+  filter(year<2020)
+
+cpcs<-pat_count_balanced_filled%>%
+  group_by(cpc,year)%>%
+  summarise(family_count=sum(pat_count,na.rm = TRUE))%>%
+  filter(family_count==0)
+
+cpcs%>%
+  group_by(year)%>%
+  summarise(no_cpc_missing=n_distinct(cpc))%>%
+  ggplot(aes(x=year, y=no_cpc_missing))+
+  geom_bar(stat = "identity")+ggtitle("Number of CPC codes where no single family was filed per year")
+  
+
+length(unique(cpcs$cpc))/length(unique(pat_count_balanced_filled$cpc))
+#212 out of 432 CPC codes have at least one year where no family is filled
+#even after 2020 and 2021 were excluded
+
+countries<-pat_count_balanced_filled%>%
+  group_by(country,year)%>%
+  summarise(country_count=sum(pat_count,na.rm = TRUE))%>%
+  filter(country_count==0)
+
+
+countries%>%
+  group_by(year)%>%
+  summarise(countries_year_miss=n_distinct(country))%>%
+  ggplot(aes(x=year, y=countries_year_miss))+
+  geom_bar(stat = "identity")+ggtitle("Number of Countries that have no Family application per year")
+  
+length(unique(countries$country))
+length(unique(pat_count_balanced_filled$country))
+#157 out of 205 countries have at least one year where no family is filed
+
+length(unique(pat_count_balanced_filled$country))-length(unique(countries$country))
+```
 
