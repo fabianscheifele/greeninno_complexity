@@ -138,11 +138,44 @@ length(obs_tochange$appln_id)/length(y2_final95_distinct$appln_id)
 y2_final95_distinct<-y2_final95_distinct%>%
  mutate(cpc_updated=case_when(is.na(new_cpc)~cpc,TRUE~new_cpc))
 
+#Change wrong CPC codes (i.e. subgroups that do not exist)
+cpc_desc<-read_xlsx(here("data","raw","cpc_description.xlsx"))
+cpc_desc$CPC<-str_replace(cpc_desc$CPC," ","")
+y2_final95_distinct<-y2_final95_distinct%>%
+  left_join(cpc_desc, by=c("cpc_updated"="CPC"))
+
+cpc_notfound<-y2_final95_distinct%>%filter(is.na(description))%>%distinct(cpc_updated)
+
+#Replace the remaining 13 codes
+y2_final95_distinct$cpc_updated[y2_final95_distinct$cpc_updated=="Y02D10/13"
+ | y2_final95_distinct$cpc_updated=="Y02D10/13"
+| y2_final95_distinct$cpc_updated=="Y02D10/126"
+| y2_final95_distinct$cpc_updated=="Y02D10/172"
+| y2_final95_distinct$cpc_updated=="Y02D10/173"
+| y2_final95_distinct$cpc_updated=="Y02D10/122"
+| y2_final95_distinct$cpc_updated=="Y02D10/16"
+| y2_final95_distinct$cpc_updated=="Y02D10/14"
+| y2_final95_distinct$cpc_updated=="Y02D10/151"
+| y2_final95_distinct$cpc_updated=="Y02D10/153"]<-"Y02D10/00"
+
+y2_final95_distinct$cpc_updated[y2_final95_distinct$cpc_updated=="Y02D70/00"]<-"Y02D30/70"
+
+#B60/126 was actually moved to Y02D/157 but then this was again replaced by Y02D10/00
+y2_final95_distinct$cpc_updated[y2_final95_distinct$cpc_updated=="Y02B60/126"]<-"Y02D10/00"
+
+y2_final95_distinct$cpc_updated[y2_final95_distinct$cpc_updated=="Y02B50/14"]<-"Y02T50/10"
+
 #dummy to mark them
 y2_final95_distinct<-y2_final95_distinct%>%
  mutate(cpc_replaced=case_when(cpc==cpc_updated~0,TRUE~1))
 
+#remove text columns
+y2_final95_distinct<-y2_final95_distinct%>%
+  select(-c("description","level"))
 
+#removing any final duplicates of CPCs that may have been created through CPC renaming
+y2_final95_distinct<-y2_final95_distinct%>%
+  distinct(appln_id, person_id, cpc, .keep_all=TRUE)
 ```
 
 
@@ -198,7 +231,7 @@ sum(is.na(int_pat_fam_final$person_ctry_code))/length(int_pat_fam_final$person_c
   #filter(is.na(person_ctry_code))
 
 #match with original raw data
-#country_exist<-y2_raw%>%filter(!is.na(person_ctry_code))
+#country_exist<-y2_final95%>%filter(!is.na(person_ctry_code))
 #country_exist<-country_exist%>%select(appln_id,docdb_family_id,person_id,person_ctry_code)
 #filter unique combinations
 #countries_exist_dis<-country_exist%>%distinct(person_id, person_ctry_code)
@@ -213,8 +246,24 @@ sum(is.na(int_pat_fam_final$person_ctry_code))/length(int_pat_fam_final$person_c
 #Dropping obsevations without country information
 int_pat_fam_final_complete<-int_pat_fam_final%>%filter(!is.na(person_ctry_code))
 
+int_pat_fam_final%>%group_by(appln_auth)%>%
+  summarise(count=n_distinct(docdb_family_id))%>%arrange(desc(count))
+
+int_pat_fam_final_complete%>%
+  group_by(appln_auth)%>%
+  summarise(count=n_distinct(docdb_family_id))%>%arrange(desc(count))
+#Japan has almost zero origin data, China families also reduced by 90%
+
+int_pat_fam_final%>%filter(is.na(person_ctry_code))%>%
+  group_by(appln_auth)%>%
+  summarise(count=n_distinct(docdb_family_id))%>%arrange(desc(count))
+
+
 #write final family-level data set (unique family, person, ipc combination)
 write_rds(int_pat_fam_final_complete, here("data", "intermediate","Y02_intl_pat_families_1995.rds"))
+
+
+#IF WANTED FOR ROBUSTNESS ONE COULD replace npw the missing country values in int_pat_fam_final with the application authority of the priority patent! 
 ```
 
 
