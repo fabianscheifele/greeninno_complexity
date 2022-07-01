@@ -229,6 +229,10 @@ length(unique(pat_count_balanced_filled$country))-length(unique(countries$countr
 #Final set of countries
 pat_count_country_final<-pat_count_balanced_filled%>%
   filter(country %notin% countries_drop)
+
+#remove unused cpc-country combinations created by "expand"
+pat_count_country_final<-pat_count_country_final%>%
+  filter(!is.na(pat_count))
 ```
 
 8. Check out infrequent CPCs to identify filter or aggregation method
@@ -249,7 +253,7 @@ pat_count_country_final<-pat_count_country_final%>%
   left_join(cpc_test, by=c("cpc"="CPC"))
 
 #Check for which codes the merge did not work
-NAs<-pat_count_country_final%>%filter(is.na(level))
+NAs<-pat_count_country_final%>%filter(is.na(cpc_level12))
 old_cpcs<-unique(NAs$cpc)
 length(unique(pat_count_country_final$cpc))
 #actually only 24 observations where merge has not worked, the rest are 
