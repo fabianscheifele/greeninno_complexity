@@ -118,6 +118,33 @@ y2_final95_distinct<-y2_final95%>%
 
 ```
 
+6. Replace deleted CPC codes by latest revisions
+```{r}
+cpc_changes<-read_xlsx(here("data","raw","cpc_changes.xlsx"))
+
+#remove white space
+cpc_changes$old_cpc<-str_replace(cpc_changes$old_cpc," ","")
+cpc_changes$new_cpc<-str_replace(cpc_changes$new_cpc," ","")
+y2_final95_distinct$cpc<-str_replace(y2_final95_distinct$cpc," ","")
+
+#merge with data
+y2_final95_distinct<-y2_final95_distinct%>%
+  left_join(cpc_changes, by=c("cpc"="old_cpc"))
+
+length(obs_tochange$appln_id)/length(y2_final95_distinct$appln_id)
+#less than 0.05% of observations are affected by this
+
+#replace codes that have been replaced by other codes
+y2_final95_distinct<-y2_final95_distinct%>%
+ mutate(cpc_updated=case_when(is.na(new_cpc)~cpc,TRUE~new_cpc))
+
+#dummy to mark them
+y2_final95_distinct<-y2_final95_distinct%>%
+ mutate(cpc_replaced=case_when(cpc==cpc_updated~0,TRUE~1))
+
+
+```
+
 
 6. Reduce to international patent families
 ```{r}

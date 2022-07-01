@@ -25,6 +25,11 @@ suppressMessages(install_load("tidyverse", "dplyr", "ggplot2", "readr", "readxl"
 2. import data
 ```{r}
 y2_fam_final<-readRDS(here("data","intermediate","Y02_intl_pat_families_1995.rds"))
+#rename updated cpc for code cohesion and drop old cpc variable
+y2_fam_final<-y2_fam_final%>%
+  rename(old_cpc=cpc)
+y2_fam_final<-y2_fam_final%>%
+  rename(cpc=cpc_updated)
 
 #how many distinct IPC codes per firm
 y2_fam_final<-y2_fam_final%>%group_by(docdb_family_id)%>%
@@ -80,6 +85,7 @@ pat_count$cpc<-gsub(" ", "", pat_count$cpc, fixed = TRUE)
 
 #Merge CPC descriptions to data#
 cpc_test<-read_excel(here("data","raw","cpc_description.xlsx"), col_names = TRUE)
+cpc_test$CPC<-gsub(" ", "", cpc_test$CPC, fixed = TRUE)
 pat_count<-left_join(pat_count, cpc_test, by=c("cpc"="CPC"))
 
 #merge countrycodes to data
@@ -116,7 +122,7 @@ pat_count<-rename(pat_count,year=earliest_fam_filing_year)
 
 5. Some tests on the data
 ```{r}
-pat_count%>%slice_max(rta,n=20)%>%select(country, earliest_fam_filing_year, cpc, rta)
+pat_count%>%slice_max(rta,n=20)%>%select(country, year, cpc, rta)
 
 country_year<-pat_count%>%group_by(country, year)%>%
   summarise(count=sum(pat_count))
@@ -156,17 +162,19 @@ topcpc%>%filter(count<5000)%>%
   ggplot(aes(x=count))+geom_histogram()
 
 summary(topcpc$count)
-#median is 131 families per count(over the whole period!
+#with non-updated CPCs: median was 131 families per CPC (over the whole period)
+#with newly updated CPC: median is 299 families per CPC (over the whole period)
 
 length(unique(pat_count$person_ctry_code))
 #205 countries
 
 length(unique(pat_count$cpc))
-#432 different Y02 cpc tags
+#with non-updated CPCs: 432 different Y02 cpc tags
+#with newly updated CPC:331 different Y02 cpc tags--> there was some consolidation, good!
 ```
 
 
-7. Filter out 2020/2021 and countries and CPC that have been infrequently filed
+7. Filter out 2020/2021 and countries infrequently file
 ```{r}
 #First, create balanced panel with all cpc, year, country combinations
 pat_count_balanced<-pat_count%>%
@@ -174,6 +182,7 @@ pat_count_balanced<-pat_count%>%
 
 pat_count_balanced_filled<-pat_count%>%right_join(pat_count_balanced)
 
+#Delete patent families in 2020 and 2021 due to strong drop due to time of registration
 pat_count_balanced_filled<-pat_count_balanced_filled%>%
   filter(year<2020)
 
@@ -189,15 +198,20 @@ cpcs%>%
   geom_bar(stat = "identity")+ggtitle("Number of CPC codes where no single family was filed per year")
   
 
-length(unique(cpcs$cpc))/length(unique(pat_count_balanced_filled$cpc))
-#212 out of 432 CPC codes have at least one year where no family is filled
-#even after 2020 and 2021 were excluded
+length(unique(cpcs$cpc))
+length(unique(pat_count_balanced_filled$cpc))
+#old CPC: for 212 out of 432 CPC codes have at least one year where no family is filled
+#new CPC: 114 out of 331 have at least one year where no family is filled#
 
+
+#Countries with zero family applications in a particular year
 countries<-pat_count_balanced_filled%>%
   group_by(country,year)%>%
   summarise(country_count=sum(pat_count,na.rm = TRUE))%>%
   filter(country_count==0)
 
+#Vector of countries that have at least one year with zero intl. family applications#
+countries_drop<-unique(countries$country)
 
 countries%>%
   group_by(year)%>%
@@ -210,5 +224,40 @@ length(unique(pat_count_balanced_filled$country))
 #157 out of 205 countries have at least one year where no family is filed
 
 length(unique(pat_count_balanced_filled$country))-length(unique(countries$country))
+#48 countries will remain in the dataset
+
+#Final set of countries
+pat_count_country_final<-pat_count_balanced_filled%>%
+  filter(country %notin% countries_drop)
+```
+
+8. Check out infrequent CPCs to identify filter or aggregation method
+```{r}
+#prepare aggregated level 2 data
+level1_2<-cpc_test%>%filter(level %in% c(0,1,2))%>%select(1,2)
+
+cpc_test<-cpc_test%>%left_join(level1_2, by="CPC")
+
+cpc_test<-cpc_test%>%
+  mutate(cpc_level12=case_when(is.na(level.y)~NA_character_,TRUE~CPC))
+
+#Fill level 3 and 4 values with nearest above level 2 value
+cpc_test<-cpc_test%>%fill(cpc_level12)%>%select(1,5)
+
+#merge to country dataset
+pat_count_country_final<-pat_count_country_final%>%
+  left_join(cpc_test, by=c("cpc"="CPC"))
+
+#Check for which codes the merge did not work
+NAs<-pat_count_country_final%>%filter(is.na(level))
+old_cpcs<-unique(NAs$cpc)
+length(unique(pat_count_country_final$cpc))
+#actually only 24 observations where merge has not worked, the rest are 
+#entries from the expand command where the country has zero patents in a certain patent class in some years#
+
+
+#pat_count_cpc_agg<-pat_count_country_final%>%
+ # group_by(year,cpc_level12)%>%
+  #summarise(pat_count2=sum(pat_count))
 ```
 
