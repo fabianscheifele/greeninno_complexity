@@ -17,7 +17,7 @@ if(!require(install.load)){
   install.packages("install.load")
   library(install.load)
 }
-suppressMessages(install_load("tidyverse", "dplyr", "ggplot2", "readr", "readxl","knitr","here", "tidyverse" , "anytime" , "data.table", "corrplot", "naniar", "fuzzyjoin","expss", "janitor","readr", "data.table", "labelled", "countrycode","grep"))
+suppressMessages(install_load("tidyverse", "dplyr", "ggplot2", "readr", "readxl","knitr","here", "tidyverse" , "anytime" , "data.table", "corrplot", "naniar", "fuzzyjoin","expss", "janitor","readr", "data.table", "labelled", "countrycode","grep", "economiccomplexity"))
 
 `%notin%` <- Negate(`%in%`)
 ```
@@ -254,14 +254,108 @@ pat_count_country_final<-pat_count_country_final%>%
 
 #Check for which codes the merge did not work
 NAs<-pat_count_country_final%>%filter(is.na(cpc_level12))
-old_cpcs<-unique(NAs$cpc)
+#no NA's means that aggregate level was found for all CPC codes
+
 length(unique(pat_count_country_final$cpc))
-#actually only 24 observations where merge has not worked, the rest are 
-#entries from the expand command where the country has zero patents in a certain patent class in some years#
+length(unique(pat_count_country_final$cpc_level12))
+#This aggregation would reduce the number of individual patent classes from 190 to 320
+
+#Re-doing the graph from above with the CPC without single application by year
+
+pat_count_cpc_agg<-pat_count_country_final%>%
+  group_by(year,cpc_level12)%>%
+  summarise(pat_count2=sum(pat_count, na.rm = TRUE))
 
 
-#pat_count_cpc_agg<-pat_count_country_final%>%
- # group_by(year,cpc_level12)%>%
-  #summarise(pat_count2=sum(pat_count))
+pat_count_cpc_agg%>%filter(pat_count2<10)%>%
+  ggplot(aes(x=pat_count2))+geom_histogram()
+
+summary(pat_count_cpc_agg$pat_count2)
+#there is no class with zero counts any more, but still quite some observations were only one application was filed per year (seen through fractional counts less than 1 or 1) 
+
+#Let's aggregate over the whole time period to see which Codes are really rare overall
+pat_count_cpc_total<-pat_count_country_final%>%
+  group_by(cpc_level12)%>%
+  summarise(pat_count3=sum(pat_count))
+
+pat_count_cpc_total%>%filter(pat_count3<1000)%>%
+  ggplot(aes(x=pat_count3))+geom_histogram()
+
+summary(pat_count_cpc_total$pat_count3)
+
+#Possible threshold of very infrequent CPC classes
+
+# 10 or less counts over the whole period: eliminates 16/190 classes
+# less than 10 counts over the whole period: eliminate 15/190 classes
+#less than 25 counts over the whole period: eliminates 22/190 classes
+#last one would make most sense because we observe 24 years of data so then on 
+#average each class has at least one count per year (is of course not equally distributed)
+
+y02<-read_excel(here("data","raw","cpc_description.xlsx"), col_names = TRUE)
+small_cpcs<-pat_count_cpc_total%>%
+  filter(pat_count3<25)%>%left_join(y02, by=c("cpc_level12"="CPC"))
+
+cpc_drop<-small_cpcs$cpc_level12
+#15 out the 22 categories we are loosing are high level-1 categories, which usually not filed as patents aim for more specific patents codes (levels 2-4). The remainin 7 relate to agro-forestry, chemicals and the Y2B10 actually only refers to CCS in the context building technologies, normal CCS has separate category Y2C. 
+
+#Patents are of course not equally distributed across years.
+pat_count_cpc_agg%>%group_by(year)%>%
+  summarise(pat_py=sum(pat_count2))%>%
+  ggplot(aes(x=year,y=pat_py))+
+  geom_bar(stat="identity")+ggtitle("Patent Family counts per year in aggregated categories")+geom_text(aes(label=round(pat_py,digits=0)),vjust=-0.4, size=2.5)
+
+
 ```
+
+9. Final CPC selection: Filter out CPC<25 counts over full period and use level-2 aggregated data
+```{r}
+pat_count_country_reduced<-pat_count_country_final%>%
+  group_by(year,country, cpc_level12)%>%
+  summarise(ipf_count=sum(pat_count))
+
+#filter out the identified cpc codes#
+pat_count_country_reduced<-pat_count_country_reduced%>%
+  filter(cpc_level12 %notin% cpc_drop)
+
+#Re-Do RTA calculations with reduced and aggregated set
+pat_count_country_reduced<-pat_count_country_reduced%>%
+  group_by(country,year)%>%
+  mutate(sum_country_year=sum(ipf_count))%>%
+  ungroup()%>%
+  group_by(cpc_level12, year)%>%
+  mutate(sum_cpc_year=sum(ipf_count))%>%
+  ungroup()%>%
+  group_by(year)%>%mutate(total_pat_year=sum(ipf_count))%>%
+  ungroup()%>%
+  mutate(rta=(ipf_count/sum_country_year)/(sum_cpc_year/total_pat_year))
+
+```
+
+```{r}
+#use economiccomplexity package to calculate RCA-matrix for each year#
+balassa_matrix_by_year <- function(t) {
+  d_year<- pat_count_country_reduced %>% filter(year == t)
+  balassa_mat<-balassa_index(
+        data = d_year,
+        country = "country",
+        product = "cpc_level12",
+        value = "ipf_count"
+      )
+}
+
+summary(d_year)
+d_year<- pat_count_country_reduced %>%
+  filter(year == 1995)%>%
+  select(1:4)
+d_year<-as.data.frame(d_year)
+d_year$country<-as.factor(d_year$country)
+balassa_mat<-balassa_index(data = d_year, country = "country", 
+                           product = "cpc_level12", 
+                           value = "ipf_count", 
+                           cutoff = 1,
+                           discrete = TRUE)
+
+y_1995<-balassa_matrix_by_year(1995)
+```
+
 

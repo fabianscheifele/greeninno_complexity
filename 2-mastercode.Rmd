@@ -115,7 +115,7 @@ y2_final95_distinct<-y2_final95%>%
   distinct(appln_id, person_id, cpc, .keep_all=TRUE)
 
 #3000 entries seem to have duplicate IPC, Person_ID and appln_id, but are not complete duplicates. Could be additional documents relating to the same application? 
-
+remove(y2_final95)
 ```
 
 6. Replace deleted CPC codes by latest revisions
@@ -131,25 +131,21 @@ y2_final95_distinct$cpc<-str_replace(y2_final95_distinct$cpc," ","")
 y2_final95_distinct<-y2_final95_distinct%>%
   left_join(cpc_changes, by=c("cpc"="old_cpc"))
 
-length(obs_tochange$appln_id)/length(y2_final95_distinct$appln_id)
+sum(is.na(y2_final95_distinct$new_cpc))/length(y2_final95_distinct$appln_id)
 #less than 0.05% of observations are affected by this
 
 #replace codes that have been replaced by other codes
 y2_final95_distinct<-y2_final95_distinct%>%
  mutate(cpc_updated=case_when(is.na(new_cpc)~cpc,TRUE~new_cpc))
 
-#Change wrong CPC codes (i.e. subgroups that do not exist)
-cpc_desc<-read_xlsx(here("data","raw","cpc_description.xlsx"))
-cpc_desc$CPC<-str_replace(cpc_desc$CPC," ","")
-y2_final95_distinct<-y2_final95_distinct%>%
-  left_join(cpc_desc, by=c("cpc_updated"="CPC"))
+sum(is.na(y2_final95_distinct$cpc_updated))
+#replacement worked, not NA's anymore#
 
-cpc_notfound<-y2_final95_distinct%>%filter(is.na(description))%>%distinct(cpc_updated)
-
-#Replace the remaining 13 codes
+#Replace the remaining 13 codes that were filed but no longer exist manually
 y2_final95_distinct$cpc_updated[y2_final95_distinct$cpc_updated=="Y02D10/13"
  | y2_final95_distinct$cpc_updated=="Y02D10/13"
 | y2_final95_distinct$cpc_updated=="Y02D10/126"
+| y2_final95_distinct$cpc_updated=="Y02D10/171"
 | y2_final95_distinct$cpc_updated=="Y02D10/172"
 | y2_final95_distinct$cpc_updated=="Y02D10/173"
 | y2_final95_distinct$cpc_updated=="Y02D10/122"
@@ -163,7 +159,16 @@ y2_final95_distinct$cpc_updated[y2_final95_distinct$cpc_updated=="Y02D70/00"]<-"
 #B60/126 was actually moved to Y02D/157 but then this was again replaced by Y02D10/00
 y2_final95_distinct$cpc_updated[y2_final95_distinct$cpc_updated=="Y02B60/126"]<-"Y02D10/00"
 
-y2_final95_distinct$cpc_updated[y2_final95_distinct$cpc_updated=="Y02B50/14"]<-"Y02T50/10"
+y2_final95_distinct$cpc_updated[y2_final95_distinct$cpc_updated=="Y02T50/14"]<-"Y02T50/10"
+
+#Check with latest description file to see any missings (i.e. subgroups that do not exist)
+cpc_desc<-read_xlsx(here("data","raw","cpc_description.xlsx"))
+cpc_desc$CPC<-str_replace(cpc_desc$CPC," ","")
+y2_final95_distinct<-y2_final95_distinct%>%
+  left_join(cpc_desc, by=c("cpc_updated"="CPC"))
+
+cpc_notfound<-y2_final95_distinct%>%filter(is.na(description))%>%distinct(cpc_updated)
+
 
 #dummy to mark them
 y2_final95_distinct<-y2_final95_distinct%>%
