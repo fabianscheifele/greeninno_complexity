@@ -174,7 +174,7 @@ length(unique(pat_count$cpc))
 ```
 
 
-7. Filter out 2020/2021 and countries infrequently file
+7. Filter out 2020/2021 and countries infrequently filed
 ```{r}
 #First, create balanced panel with all cpc, year, country combinations
 pat_count_balanced<-pat_count%>%
@@ -210,6 +210,7 @@ countries<-pat_count_balanced_filled%>%
   summarise(country_count=sum(pat_count,na.rm = TRUE))%>%
   filter(country_count==0)
 
+
 #Vector of countries that have at least one year with zero intl. family applications#
 countries_drop<-unique(countries$country)
 
@@ -229,6 +230,16 @@ length(unique(pat_count_balanced_filled$country))-length(unique(countries$countr
 #Final set of countries
 pat_count_country_final<-pat_count_balanced_filled%>%
   filter(country %notin% countries_drop)
+
+country_names<-pat_count_country_final%>%select(1,7)%>%distinct()
+#Add hong-kong to mainland China
+pat_count_country_final$
+  person_ctry_code[pat_count_country_final$
+                                           person_ctry_code=="HK"]<-"CN"
+
+pat_count_country_final$
+  country[pat_count_country_final$country=="Hong Kong SAR China"]<-"China"
+
 
 #remove unused cpc-country combinations created by "expand"
 pat_count_country_final<-pat_count_country_final%>%
@@ -329,33 +340,10 @@ pat_count_country_reduced<-pat_count_country_reduced%>%
   ungroup()%>%
   mutate(rta=(ipf_count/sum_country_year)/(sum_cpc_year/total_pat_year))
 
+#rename country variable so it works with the economiccomplexity package
+pat_count_country_reduced<-pat_count_country_reduced%>%
+  rename(origin=country)
+
+#write final rds
+saveRDS(pat_count_country_reduced, here("data","final","final_ipf_count_reduced.rds"))
 ```
-
-```{r}
-#use economiccomplexity package to calculate RCA-matrix for each year#
-balassa_matrix_by_year <- function(t) {
-  d_year<- pat_count_country_reduced %>% filter(year == t)
-  balassa_mat<-balassa_index(
-        data = d_year,
-        country = "country",
-        product = "cpc_level12",
-        value = "ipf_count"
-      )
-}
-
-summary(d_year)
-d_year<- pat_count_country_reduced %>%
-  filter(year == 1995)%>%
-  select(1:4)
-d_year<-as.data.frame(d_year)
-d_year$country<-as.factor(d_year$country)
-balassa_mat<-balassa_index(data = d_year, country = "country", 
-                           product = "cpc_level12", 
-                           value = "ipf_count", 
-                           cutoff = 1,
-                           discrete = TRUE)
-
-y_1995<-balassa_matrix_by_year(1995)
-```
-
-

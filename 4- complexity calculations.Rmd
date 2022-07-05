@@ -1,0 +1,112 @@
+---
+title: "4- Complexity calculations"
+author: "Fabian Scheifele"
+date: "5 7 2022"
+output: html_document
+---
+
+1. packages
+```{r}
+suppressMessages(memory.limit(size = NA))
+
+if(!require(install.load)){
+  install.packages("install.load")
+  library(install.load)
+}
+suppressMessages(install_load("tidyverse", "dplyr", "ggplot2", "readr", "readxl","knitr","here", "tidyverse" , "anytime" , "data.table", "corrplot", "naniar", "fuzzyjoin","expss", "janitor","readr", "data.table", "labelled", "countrycode","grep", "economiccomplexity"))
+
+`%notin%` <- Negate(`%in%`)
+```
+
+2. import data
+```{r}
+pat_count_country_reduced<-readRDS(here("data","final","final_ipf_count_reduced.rds"))
+cpc_text<-read_xlsx(here("data","raw","cpc_description.xlsx"))
+```
+
+
+3. Create annual complexity indices (may be a bit too volatile)
+```{r}
+#use economiccomplexity package to calculate RCA-matrix for each year#
+
+
+#PCI Calculation via function
+pci_function <- function(t,df) {
+  d_year<- df %>% filter(year == t)
+  balassa_mat<-balassa_index(
+        data = d_year,
+        country = "origin",
+        product = "cpc_level12",
+        value = "ipf_count"
+      )
+  com<-complexity_measures(balassa_mat,
+                      method = "eigenvalues")
+  pci<-as.data.frame(com$complexity_index_product)
+  pci<-setDT(pci,keep.rownames = TRUE)%>%mutate(year= t)
+  pci<-pci%>%rename(cpc=rn)
+  pci<-pci%>%rename(pci="com$complexity_index_product")
+}
+years<-c(1995:2019)
+pciall<-lapply(years, pci_function, 
+               df= pat_count_country_reduced)
+
+pciall<-bind_rows(pciall)
+
+
+
+
+#ECI Calculation via function
+eci_function <- function(t,df) {
+  d_year<- df %>% filter(year == t)
+  balassa_mat<-balassa_index(
+        data = d_year,
+        country = "origin",
+        product = "cpc_level12",
+        value = "ipf_count"
+      )
+  com<-complexity_measures(balassa_mat,
+                      method = "eigenvalues")
+  eci<-as.data.frame(com$complexity_index_country)
+  eci<-setDT(eci,keep.rownames = TRUE)%>%mutate(year= t)
+  eci<-eci%>%rename(country=rn)
+  eci<-eci%>%rename(eci="com$complexity_index_country")
+}
+
+eciall<-lapply(years,eci_function, df =pat_count_country_reduced)
+eciall<-bind_rows(eciall)
+```
+
+
+4. Three year intervals
+```{r}
+pat_count_country_reduced$threeyear_period <-with(pat_count_country_reduced,
+       ifelse(year %in% c(1995:1997) , "1995-1997",
+              ifelse(year %in% c(1998:2000) , "1998-2000",
+              ifelse(year %in% c(2001:2003) , "2001-2003",       
+              ifelse(year %in% c(2004:2006) , "2004-2006",       
+              ifelse(year %in% c(2007:2009) , "2007-2009", 
+              ifelse(year %in% c(2010:2012) , "2010-2012", 
+              ifelse(year %in% c(2013:2015) , "2013-2015",
+              ifelse(year %in% c(2016:2018) , "2016-2018",
+                     NA)))))))))
+
+threeyear<-pat_count_country_reduced%>%filter(!is.na(threeyear_period))%>%
+  group_by(threeyear_period,origin, cpc_level12)%>%
+  summarise(ipf_count=sum(ipf_count))
+threeyear<-threeyear%>%
+  rename(year=threeyear_period)
+
+years_3y<-unique(threeyear$year)
+pci_3y<-lapply(years_3y, pci_function, df=threeyear)
+pci_3y<-bind_rows(pci_3y)
+
+eci_3y<-lapply(years_3y, eci_function, df=threeyear)
+eci_3y<-bind_rows(eci_3y)
+
+```
+
+5. Comparison of ECI/PCI with annual or three year weighted RCA
+```{r}
+
+```
+
