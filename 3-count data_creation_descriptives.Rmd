@@ -66,7 +66,7 @@ hist(inv_counts$distinct_inv)
 
 3. Creating fractional count by appln_id for y2_final (with replaced residences)
 ```{r}
-#Create fractional count (each family-invest-CPC combination is one row with the fraction of this inventor-CPC combination)
+#Create fractional count (each family-person-CPC combination is one row with the fraction of this inventor-CPC combination)
 y2_fam_final<-y2_fam_final%>%
   group_by(docdb_family_id)%>%
   mutate(frac=1/n())
@@ -232,6 +232,7 @@ pat_count_country_final<-pat_count_balanced_filled%>%
   filter(country %notin% countries_drop)
 
 country_names<-pat_count_country_final%>%select(1,7)%>%distinct()
+
 #Add hong-kong to mainland China
 pat_count_country_final$
   person_ctry_code[pat_count_country_final$
@@ -240,10 +241,17 @@ pat_count_country_final$
 pat_count_country_final$
   country[pat_count_country_final$country=="Hong Kong SAR China"]<-"China"
 
+#Take out small city states (Liechtenstein & Luxemburg)
+
+pat_count_country_final<-pat_count_country_final%>%
+  filter(country %notin% c("Liechtenstein", "Luxembourg"))
 
 #remove unused cpc-country combinations created by "expand"
 pat_count_country_final<-pat_count_country_final%>%
   filter(!is.na(pat_count))
+
+length(unique(pat_count_country_final$country))
+#45 countries remain after HK-->CN, Liechtenstein and Luxembourg removed
 ```
 
 8. Check out infrequent CPCs to identify filter or aggregation method
@@ -347,3 +355,9 @@ pat_count_country_reduced<-pat_count_country_reduced%>%
 #write final rds
 saveRDS(pat_count_country_reduced, here("data","final","final_ipf_count_reduced.rds"))
 ```
+
+10. Descriptive Statistics on final count data set
+```{r}
+
+```
+

@@ -229,24 +229,42 @@ sum(is.na(int_pat_fam_final$person_ctry_code))/length(int_pat_fam_final$person_c
 
 ```
 
-7. Try to recuperate some ctry_code in case distinct dropped observations with country codes
-(DOES NOT WORK)
+7. Checking out missing country information for IPF's
 ```{r}
-#missing_country<-int_pat_fam_final%>%
-  #filter(is.na(person_ctry_code))
+missing_country<-int_pat_fam_final%>%
+  filter(is.na(person_ctry_code))
+
+length(unique(missing_country$docdb_family_id))/length(unique(int_pat_fam_final$docdb_family_id))
+#For 58.4% of all IPF inventor residence info is incomplete. 
+
+family_found<-int_pat_fam_final%>%filter(!is.na(person_ctry_code))%>%
+  distinct(docdb_family_id)
+
+length(family_found$docdb_family_id)/length(unique(int_pat_fam_final$docdb_family_id))
+#For 98.4% of International Patent Families we have at least one inventor's residence info
+
+missing_country%>%group_by(appln_auth)%>%
+  summarise(top_missing=n_distinct(docdb_family_id))%>%
+  slice_max(top_missing, n=10)
+#Patent offices with most missing info are CN, JP, AU, KR, ES, MX
+```
+
+8. Attempt to recuperate remaining missing data through matching with other applications
+that were dropped by distinct: Nothing found! 
+```{r}
 
 #match with original raw data
-#country_exist<-y2_final95%>%filter(!is.na(person_ctry_code))
+#country_exist<-y2_final95_distinct%>%filter(!is.na(person_ctry_code))
 #country_exist<-country_exist%>%select(appln_id,docdb_family_id,person_id,person_ctry_code)
 #filter unique combinations
 #countries_exist_dis<-country_exist%>%distinct(person_id, person_ctry_code)
 
-#countries_found<-inner_join(missing_country,countries_exist_dis, by=c("person_id"))
+#countries_found<-left_join(missing_country,countries_exist_dis, by=c("person_id"))
 #Does not find any missing person information
-
+#sum(is.na(countries_found$person_ctry_code.y))
 ```
 
-8. Dropping remaining NA's for person_ctry_code and creating final data set
+9. Dropping remaining NA's for person_ctry_code and creating final data set
 ```{r}
 #Dropping obsevations without country information
 int_pat_fam_final_complete<-int_pat_fam_final%>%filter(!is.na(person_ctry_code))

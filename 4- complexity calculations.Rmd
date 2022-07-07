@@ -3,6 +3,8 @@ title: "4- Complexity calculations"
 author: "Fabian Scheifele"
 date: "5 7 2022"
 output: html_document
+editor_options: 
+  chunk_output_type: console
 ---
 
 1. packages
@@ -13,9 +15,21 @@ if(!require(install.load)){
   install.packages("install.load")
   library(install.load)
 }
-suppressMessages(install_load("tidyverse", "dplyr", "ggplot2", "readr", "readxl","knitr","here", "tidyverse" , "anytime" , "data.table", "corrplot", "naniar", "fuzzyjoin","expss", "janitor","readr", "data.table", "labelled", "countrycode","grep", "economiccomplexity"))
+suppressMessages(install_load("tidyverse", "dplyr", "ggplot2", "readr", "readxl","knitr","here", "tidyverse" , "anytime" , "data.table", "corrplot", "naniar", "fuzzyjoin","expss", "janitor","readr", "data.table", "labelled", "countrycode","grep", "economiccomplexity","xtable"))
 
 `%notin%` <- Negate(`%in%`)
+
+rta<-function(df,i,t,cat,value){
+  df%>%group_by(i,t)%>%
+  mutate(sum_country_year=sum(value))%>%
+  ungroup()%>%
+  group_by(cat, t)%>%
+  mutate(sum_cpc_year=sum(value))%>%
+  ungroup()%>%
+  group_by(t)%>%mutate(total_pat_year=sum(value))%>%
+  ungroup()%>%
+  mutate(rta=(value/sum_country_year)/(sum_cpc_year/total_pat_year))
+}
 ```
 
 2. import data
@@ -93,9 +107,20 @@ pat_count_country_reduced$threeyear_period <-with(pat_count_country_reduced,
 threeyear<-pat_count_country_reduced%>%filter(!is.na(threeyear_period))%>%
   group_by(threeyear_period,origin, cpc_level12)%>%
   summarise(ipf_count=sum(ipf_count))
-threeyear<-threeyear%>%
-  rename(year=threeyear_period)
 
+#replicate RCA calculations for three-year interval
+threeyear<-threeyear%>%
+  group_by(origin,year)%>%
+  mutate(sum_country_year=sum(ipf_count))%>%
+  ungroup()%>%
+  group_by(cpc_level12, year)%>%
+  mutate(sum_cpc_year=sum(ipf_count))%>%
+  ungroup()%>%
+  group_by(year)%>%mutate(total_pat_year=sum(ipf_count))%>%
+  ungroup()%>%
+  mutate(rta=(ipf_count/sum_country_year)/(sum_cpc_year/total_pat_year))
+
+#Replicate ECI and PCI Calculations
 years_3y<-unique(threeyear$year)
 pci_3y<-lapply(years_3y, pci_function, df=threeyear)
 pci_3y<-bind_rows(pci_3y)
@@ -103,10 +128,200 @@ pci_3y<-bind_rows(pci_3y)
 eci_3y<-lapply(years_3y, eci_function, df=threeyear)
 eci_3y<-bind_rows(eci_3y)
 
+#Join values to main dataset
+threeyear<-threeyear%>%left_join(pci_3y, by=c("year","cpc_level12"="cpc"))
+threeyear<-threeyear%>%left_join(eci_3y, by=c("year","origin"="country"))
 ```
+
 
 5. Comparison of ECI/PCI with annual or three year weighted RCA
 ```{r}
+top_15<-function(t,df){
+  table<-df%>%filter(year==t)%>%
+  slice_max(eci, n=15)%>%select(1,2)
+}
+
+top15<-lapply(years_3y, top_15, df=eci_3y)
+
+lead9597<-eci_3y%>%filter(year=="1995-1997")%>%
+  slice_max(eci, n=15)%>%select(1,2)
+lead9800<-eci_3y%>%filter(year=="1998-2000")%>%
+  slice_max(eci, n=15)%>%select(1,2)
+lead0103<-eci_3y%>%filter(year=="2001-2003")%>%
+  slice_max(eci, n=15)%>%select(1,2)
+lead0406<-eci_3y%>%filter(year=="2004-2006")%>%
+  slice_max(eci, n=15)%>%select(1,2)
+lead0709<-eci_3y%>%filter(year=="2007-2009")%>%
+  slice_max(eci, n=45)%>%select(1,2)
+lead1012<-eci_3y%>%filter(year=="2010-2012")%>%
+  slice_max(eci, n=45)%>%select(1,2)
+lead1315<-eci_3y%>%filter(year=="2013-2015")%>%
+  slice_max(eci, n=15)%>%select(1,2)
+lead1618<-eci_3y%>%filter(year=="2016-2018")%>%
+  slice_max(eci, n=15)%>%select(1,2)
+
+print(xtable(lead9597, caption="ECI for Period 1995-1997 based on Y02 Intl. Patent Families", type = "latex"), file = here("output","eci9597.tex"))
+print(xtable(lead0406, caption="ECI for Period 2004-2006 based on Y02 Intl. Patent Families", type = "latex"), file = here("output","eci0406.tex"))
+print(xtable(lead0709, caption="ECI for Period 2007-2009 based on Y02 Intl. Patent Families", type = "latex"), file = here("output","eci0709.tex"))
+print(xtable(lead1012, caption="ECI for Period 2010-2012 based on Y02 Intl. Patent Families", type = "latex"), file = here("output","eci1012.tex"))
+print(xtable(lead1315, caption="ECI for Period 2013-2015 based on Y02 Intl. Patent Families", type = "latex"), file = here("output","eci1315.tex"))
+
+#Create differences of RTA over time
+threeyear<-threeyear%>%mutate(rta1=if_else(rta>1,1,0))
+```
+
+
+8. Some info about the 3-year grouped data
+```{r}
+country_agg<-threeyear%>%group_by(origin,year)%>%
+  summarise(sum_ipf=sum(ipf_count), avg_rta=mean(rta), avg_pci=mean(pci), eci=mean(eci), distinct_cpc=n_distinct(cpc_level12), sum_rta=sum(rta1))
+
+test1995<-country_agg%>%filter(year=="1995-1997")
+mean(test1995$avg_rta)
+
+
+threeyear$year<-as.factor(threeyear$year)
+
+year_agg<-threeyear%>%
+  group_by(year)%>%
+  summarise(sum_ipf=sum(ipf_count), avg_rta=mean(rta), avg_pci=mean(pci), eci=mean(eci), distinct_cpc=n_distinct(cpc_level12), sum_rta=sum(rta1), distinct_countries=n_distinct(origin))
+
+
+avg_test<-threeyear%>%filter(year=="1995-1997")%>%select(rta)
+summary(avg_test$rta)
+
+threeyear%>%filter(rta<20)%>%ggplot(aes(rta))+geom_histogram()+ggtitle("RTA Distribution, cut off at 20")
+argentina95<-threeyear%>%filter(origin=="Argentina", year=="1995-1997")
+Y02A40_10<-threeyear%>%filter(cpc_level12=="Y02A40/10", year=="1995-1997")
+sum(Y02A40_10$ipf_count)
+
+germany<-pat_count_country_reduced%>%filter(origin=="Germany", year %in% c(1995:1997), cpc_level12=="Y02A40/10")
+
+germany2<-threeyear%>%
+  filter(origin=="Germany", year =="1995-1997", cpc_level12=="Y02A40/10")
+
+median(threeyear$rta)
+```
+
+
+8. What happend with the industrialised countries
+```{r}
+
+
+
+what_happened<-country_agg%>%
+  filter(origin%in%c("Germany", "United States", "China", "South Korea", "Taiwan", "Sweden"))
+ggplot(what_happened, aes(x=year,y=avg_rta, color=origin, group=origin))+geom_point()+geom_line()
+
+ggplot(what_happened, aes(x=year,y=avg_pci, color=origin, group=origin))+geom_point()+geom_line()
+
+ggplot(what_happened, aes(x=year,y=sum_ipf, color=origin, group=origin))+geom_point()+geom_line()
+
+ggplot(what_happened, aes(x=year,y=eci, color=origin, group=origin))+geom_point()+geom_line()
+
+ggplot(what_happened, aes(x=year,y=distinct_cpc, color=origin, group=origin))+geom_point()+geom_line()
+
+ggplot(what_happened, aes(x=year,y=sum_rta, color=origin, group=origin))+geom_point()+geom_line()
+
+threeyear%>%group_by(year)%>%
+  summarise(ipf_total=sum(ipf_count))%>%
+  ggplot(aes(x=year,y=ipf_total))+
+  geom_bar(stat="identity")+
+  ggtitle("Y02 Family counts by 3-year period")+geom_text(aes(label=round(ipf_total,digits=0)),vjust=-0.4)
+
+```
+
+
+11. make the product space (0.2 tolerance)
+```{r}
+library(igraph)
+library(ggplot2)
+library(ggraph)
+#One dataset for the full period 
+productspace<-pat_count_country_reduced%>%
+  group_by(origin, cpc_level12)%>%
+  summarise(count=sum(ipf_count))
+
+bi <- balassa_index(
+  data = productspace,
+  country = "origin",
+  product = "cpc_level12",
+  value = "count"
+)
+
+com_fit <- complexity_measures(balassa_index = bi)
+
+pro <- proximity(
+  balassa_index = bi
+)
+
+net <- projections(
+  proximity_country = pro$proximity_country,
+  proximity_product = pro$proximity_product,
+  tolerance = 0.2
+)
+
+aggregated_products <- productspace %>%
+  group_by(cpc_level12) %>%
+  summarise(count = sum(count))
+
+aggregated_products <- setNames(aggregated_products$count, aggregated_products$cpc_level12)
+V(net$network_product)$size <- aggregated_products[match(V(net$network_product)$name, names(aggregated_products))]
+
+set.seed(200100)
+
+g_products <- net$network_product %>%
+  ggraph(layout = "kk") +
+  # geom_edge_link(aes(edge_width = weight), edge_colour = "#a8a8a8") +
+  geom_edge_link(edge_colour = "#888888") +
+  geom_node_point(aes(size = size), color = "#24b619") +
+  geom_node_text(aes(label = name), size=2.5, vjust = 2.2)+
+  theme_void()
+
+g_products
+#save it with width=2000, height=1242
+```
+
+12. make the product space (0.05 tolerance)
+```{r}
+
+bi <- balassa_index(
+  data = productspace,
+  country = "origin",
+  product = "cpc_level12",
+  value = "count"
+)
+
+com_fit <- complexity_measures(balassa_index = bi)
+
+pro <- proximity(
+  balassa_index = bi
+)
+
+net <- projections(
+  proximity_country = pro$proximity_country,
+  proximity_product = pro$proximity_product,
+  tolerance = 0.05
+)
+
+aggregated_products <- productspace %>%
+  group_by(cpc_level12) %>%
+  summarise(count = sum(count))
+
+aggregated_products <- setNames(aggregated_products$count, aggregated_products$cpc_level12)
+V(net$network_product)$size <- aggregated_products[match(V(net$network_product)$name, names(aggregated_products))]
+
+set.seed(200100)
+
+g_products <- net$network_product %>%
+  ggraph(layout = "kk") +
+  # geom_edge_link(aes(edge_width = weight), edge_colour = "#a8a8a8") +
+  geom_edge_link(edge_colour = "#888888") +
+  geom_node_point(aes(size = size), color = "#24b619") +
+  geom_node_text(aes(label = name), size=2.5, vjust = 2.2) +
+  theme_void()
+
+g_products
 
 ```
 
