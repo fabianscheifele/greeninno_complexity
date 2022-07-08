@@ -30,6 +30,7 @@ rta<-function(df,i,t,cat,value){
   ungroup()%>%
   mutate(rta=(value/sum_country_year)/(sum_cpc_year/total_pat_year))
 }
+options(scipen=999)
 ```
 
 2. import data
@@ -38,12 +39,8 @@ pat_count_country_reduced<-readRDS(here("data","final","final_ipf_count_reduced.
 cpc_text<-read_xlsx(here("data","raw","cpc_description.xlsx"))
 ```
 
-
-3. Create annual complexity indices (may be a bit too volatile)
+3. Create general ECI function (to be used for different time frames)
 ```{r}
-#use economiccomplexity package to calculate RCA-matrix for each year#
-
-
 #PCI Calculation via function
 pci_function <- function(t,df) {
   d_year<- df %>% filter(year == t)
@@ -60,14 +57,6 @@ pci_function <- function(t,df) {
   pci<-pci%>%rename(cpc=rn)
   pci<-pci%>%rename(pci="com$complexity_index_product")
 }
-years<-c(1995:2019)
-pciall<-lapply(years, pci_function, 
-               df= pat_count_country_reduced)
-
-pciall<-bind_rows(pciall)
-
-
-
 
 #ECI Calculation via function
 eci_function <- function(t,df) {
@@ -86,8 +75,22 @@ eci_function <- function(t,df) {
   eci<-eci%>%rename(eci="com$complexity_index_country")
 }
 
+```
+
+
+3. Create annual complexity indices (may be a bit too volatile)
+```{r}
+
+years<-c(1995:2019)
+pciall<-lapply(years, pci_function, 
+               df= pat_count_country_reduced)
+pciall<-bind_rows(pciall)
+
 eciall<-lapply(years,eci_function, df =pat_count_country_reduced)
 eciall<-bind_rows(eciall)
+
+remove(eciall)
+remove(pciall)
 ```
 
 
@@ -107,6 +110,8 @@ pat_count_country_reduced$threeyear_period <-with(pat_count_country_reduced,
 threeyear<-pat_count_country_reduced%>%filter(!is.na(threeyear_period))%>%
   group_by(threeyear_period,origin, cpc_level12)%>%
   summarise(ipf_count=sum(ipf_count))
+
+threeyear<-threeyear%>%rename(year=threeyear_period)
 
 #replicate RCA calculations for three-year interval
 threeyear<-threeyear%>%
@@ -204,11 +209,8 @@ median(threeyear$rta)
 ```
 
 
-8. What happend with the industrialised countries
+8. 3-year intervals: What happend with the industrialised countries
 ```{r}
-
-
-
 what_happened<-country_agg%>%
   filter(origin%in%c("Germany", "United States", "China", "South Korea", "Taiwan", "Sweden"))
 ggplot(what_happened, aes(x=year,y=avg_rta, color=origin, group=origin))+geom_point()+geom_line()
@@ -232,16 +234,219 @@ threeyear%>%group_by(year)%>%
 ```
 
 
+11. Five year intervals ECI and PCI calculations
+```{r}
+pat_count_country_reduced$fiveyear_period <-with(pat_count_country_reduced,
+       ifelse(year %in% c(1995:1999) , "1995-1999",
+              ifelse(year %in% c(2000:2004) , "2000-2004",
+              ifelse(year %in% c(2005:2009) , "2005-2009",       
+              ifelse(year %in% c(2010:2014) , "2010-2014",       
+              ifelse(year %in% c(2015:2019) , "2015-2019", 
+                     NA))))))
+
+fiveyear<-pat_count_country_reduced%>%
+  group_by(fiveyear_period,origin, cpc_level12)%>%
+  summarise(ipf_count=sum(ipf_count))
+
+fiveyear<-fiveyear%>%rename(year=fiveyear_period)
+
+#replicate RCA calculations for five-year interval
+fiveyear<-fiveyear%>%
+  group_by(origin,year)%>%
+  mutate(sum_country_year=sum(ipf_count))%>%
+  ungroup()%>%
+  group_by(cpc_level12, year)%>%
+  mutate(sum_cpc_year=sum(ipf_count))%>%
+  ungroup()%>%
+  group_by(year)%>%mutate(total_pat_year=sum(ipf_count))%>%
+  ungroup()%>%
+  mutate(rta=(ipf_count/sum_country_year)/(sum_cpc_year/total_pat_year))%>%
+  mutate(rta1=if_else(rta>1,1,0))
+
+
+#Replicate ECI and PCI Calculations
+years_5y<-unique(fiveyear$year)
+pci_5y<-lapply(years_5y, pci_function, df=fiveyear)
+pci_5y<-bind_rows(pci_5y)
+
+fiveyear<-lapply(years_5y, eci_function, df=fiveyear)
+fiveyear<-bind_rows(fiveyear)
+
+#Join values to main dataset
+fiveyear<-fiveyear%>%left_join(pci_5y, by=c("year","cpc_level12"="cpc"))
+fiveyear<-fiveyear%>%left_join(fiveyear, by=c("year","origin"="country"))
+
+#Investigate normality of ECI and PCI values
+fiveyear%>%filter(year=="1995-1999")%>%
+    ggplot(aes(eci))+geom_histogram()+ggtitle("ECI 1995-1999")
+fiveyear%>%filter(year=="2000-2004")%>%
+    ggplot(aes(eci))+geom_histogram()+ggtitle("ECI 2000-2004")
+fiveyear%>%filter(year=="2005-2009")%>%
+    ggplot(aes(eci))+geom_histogram()+ggtitle("ECI 2005-2009")
+fiveyear%>%filter(year=="2005-2009")%>%
+    ggplot(aes(eci))+geom_histogram()+ggtitle("ECI 2005-2009")
+fiveyear%>%filter(year=="2010-2014")%>%
+    ggplot(aes(eci))+geom_histogram()+ggtitle("ECI 2010-2014")
+fiveyear%>%filter(year=="2015-2019")%>%
+    ggplot(aes(eci))+geom_histogram()+ggtitle("ECI 2015-2019")
+
+#Investigate top15 rankings
+generalstats<-fiveyear%>%group_by(year)%>%
+  summarize(avg_ipfcpc_total=sum(ipf_count)/n_distinct(cpc_level12),total_count=sum(ipf_count))
+
+lead9599<- fiveyear%>%filter(year=="1995-1999")%>%group_by(origin)%>%
+  summarise(eci=mean(eci),ipf_count=sum(ipf_count),cpc=n_distinct(cpc_level12), no_rta=sum(rta1))%>%
+  mutate(avg_ipf_cpc__country=ipf_count/cpc)%>%mutate(year="1995-1999")
+lead9599<-lead9599%>%left_join(generalstats, by=c("year"))%>%
+  mutate(ipf_needed_for_rca=(avg_ipfcpc_total/total_count)*ipf_count)%>%
+  mutate(world_share=ipf_count/total_count)%>%
+  arrange(desc(eci))
+            
+lead0004<- fiveyear%>%filter(year=="2000-2004")%>%group_by(origin)%>%
+  summarise(eci=mean(eci),ipf_count=sum(ipf_count),cpc=n_distinct(cpc_level12), no_rta=sum(rta1))%>%
+  mutate(avg_ipf_cpc__country=ipf_count/cpc)%>%mutate(year="2000-2004")
+lead0004<-lead0004%>%left_join(generalstats, by=c("year"))%>%
+  mutate(ipf_needed_for_rca=(avg_ipfcpc_total/total_count)*ipf_count)%>%
+  mutate(world_share=ipf_count/total_count)%>%
+  arrange(desc(eci))
+
+lead0509<- fiveyear%>%filter(year=="2005-2009")%>%group_by(origin)%>%
+  summarise(eci=mean(eci),ipf_count=sum(ipf_count),cpc=n_distinct(cpc_level12), no_rta=sum(rta1))%>%
+  mutate(avg_ipf_cpc__country=ipf_count/cpc)%>%mutate(year="2005-2009")
+lead0509<-lead0509%>%left_join(generalstats, by=c("year"))%>%
+  mutate(ipf_needed_for_rca=(avg_ipfcpc_total/total_count)*ipf_count)%>%
+  mutate(world_share=ipf_count/total_count)%>%
+  arrange(desc(eci))
+
+lead1014<- fiveyear%>%filter(year=="2010-2014")%>%group_by(origin)%>%
+  summarise(eci=mean(eci),ipf_count=sum(ipf_count),cpc=n_distinct(cpc_level12), no_rta=sum(rta1))%>%
+  mutate(avg_ipf_cpc__country=ipf_count/cpc)%>%mutate(year="2010-2014")
+lead1014<-lead1014%>%left_join(generalstats, by=c("year"))%>%
+  mutate(ipf_needed_for_rca=(avg_ipfcpc_total/total_count)*ipf_count)%>%
+  mutate(world_share=ipf_count/total_count)%>%
+  arrange(desc(eci))
+
+lead1519<- fiveyear%>%filter(year=="2015-2019")%>%group_by(origin)%>%
+  summarise(eci=mean(eci),ipf_count=sum(ipf_count),cpc=n_distinct(cpc_level12), no_rta=sum(rta1))%>%
+  mutate(avg_ipf_cpc__country=ipf_count/cpc)%>%mutate(year="2015-2019")
+lead1519<-lead1519%>%left_join(generalstats, by=c("year"))%>%
+  mutate(ipf_needed_for_rca=(avg_ipfcpc_total/total_count)*ipf_count)%>%
+  mutate(world_share=ipf_count/total_count)%>%
+  arrange(desc(eci))
+
+
+#Look at PCI
+pci_5y<-pci_5y%>%
+  left_join(cpc_text, by=c("cpc"="CPC"))
+
+#Investigate top15 rankings
+lead_pci9599<-pci_5y%>%filter(year=="1995-1999")%>%
+  select(1,2,5)%>%arrange(desc(pci))
+lead_pci0004<-pci_5y%>%filter(year=="2000-2004")%>%
+  select(1,2,5)%>%arrange(desc(pci))
+lead_pci0509<-pci_5y%>%filter(year=="2005-2009")%>%
+  select(1,2,5)%>%arrange(desc(pci))
+lead_pci1014<-pci_5y%>%filter(year=="2010-2014")%>%
+  select(1,2,5)%>%arrange(desc(pci))
+lead_pci1519<-pci_5y%>%filter(year=="2015-2019")%>%
+  select(1,2,5)%>%arrange(desc(pci))
+```
+
+11. ECI calculation over entire period
+```{r}
+productspace<-pat_count_country_reduced%>%
+  group_by(origin, cpc_level12)%>%
+  summarise(count=sum(ipf_count))
+
+ balassa_mat<-balassa_index(
+        data = productspace,
+        country = "origin",
+        product = "cpc_level12",
+        value = "count"
+      )
+  com<-complexity_measures(balassa_mat,
+                      method = "eigenvalues")
+  eci<-as.data.frame(com$complexity_index_country)
+  eci<-setDT(eci,keep.rownames = TRUE)
+  eci<-eci%>%rename(country=rn)
+  eci<-eci%>%rename(eci="com$complexity_index_country")
+
+productspace<-productspace%>%left_join(eci,by=c("origin"="country"))
+    
+productspace<-productspace%>%
+  group_by(origin)%>%
+  mutate(sum_country=sum(count))%>%
+  ungroup()%>%
+  group_by(cpc_level12)%>%
+  mutate(sum_cpc=sum(count))%>%
+  ungroup()%>%
+  mutate(total_pat=sum(count))%>%
+  mutate(rta=(count/sum_country)/(sum_cpc/total_pat))
+
+productspace<-productspace%>%mutate(rta1=if_else(rta>1,1,0))
+
+generalstats2<-productspace%>%
+  summarize(avg_ipfcpc_total=sum(count)/n_distinct(cpc_level12),total_count=sum(count))%>%mutate(year="all_periods")
+
+eci_fullperiod<- productspace%>%group_by(origin)%>%
+  summarise(eci=mean(eci),ipf_count=sum(count),cpc=n_distinct(cpc_level12), no_rta=sum(rta1))%>%
+  mutate(avg_ipf_cpc__country=ipf_count/cpc)%>%mutate(year="all_periods")
+
+eci_fullperiod<-eci_fullperiod%>%bind_cols(generalstats2)
+eci_fullperiod<-eci_fullperiod%>%
+  mutate(ipf_needed_for_rca=(avg_ipfcpc_total/total_count)*ipf_count)%>%
+  mutate(world_share=ipf_count/total_count)%>%
+  arrange(desc(eci))
+
+eci_fullperiod%>%filter(world_share>0.01)%>%
+  ggplot(aes(x= reorder(origin, -world_share), y=world_share))+geom_bar(stat = "identity")+
+  ggtitle("Share of Y02 IPF over full period 1995-2019")+
+  geom_text(aes(label=round(world_share,digits=2)),vjust=-0.4)
+#7 countries make up 81% of all IPF counts
+
+
+summary(eci$eci)
+sd(eci$eci)
+hist(eci$eci)
+eci%>%filter(eci>-3)%>%
+  ggplot(aes(x=eci))+geom_histogram()+ggtitle("ECI Distribution-ECI calculated over whole period")
+
+```
+
+11. Add the PCI over the full period
+```{r}
+pci<-as.data.frame(com$complexity_index_product)
+pci<-setDT(pci,keep.rownames = TRUE)
+pci<-pci%>%rename(cpc=rn)
+pci<-pci%>%rename(pci="com$complexity_index_product")
+
+productspace<-productspace%>%left_join(pci,by=c("cpc_level12"="cpc"))
+
+pci_fullperiod<-productspace%>%group_by(cpc_level12)%>%
+  summarize(count=sum(count))%>%
+  ungroup%>%
+  mutate(share=count/sum(count))
+pci_fullperiod<-pci_fullperiod%>%left_join(cpc_text, by=c("cpc_level12"="CPC"))
+
+pci_fullperiod%>%filter(share>0.03)%>%
+  ggplot(aes(x= reorder(short_name, -share), y=share))+geom_bar(stat = "identity")+
+  ggtitle("Share of Y02 CPC codes (level 1/2) of total IPF over full period 1995-2019")+
+  geom_text(aes(label=round(share,digits=2)),vjust=-0.4)
+
+#7/168 (~4%) make up 47% of all IPF applications
+#Batteries,
+```
+
+
+
 11. make the product space (0.2 tolerance)
 ```{r}
 library(igraph)
 library(ggplot2)
 library(ggraph)
 #One dataset for the full period 
-productspace<-pat_count_country_reduced%>%
-  group_by(origin, cpc_level12)%>%
-  summarise(count=sum(ipf_count))
-
+description<-productspace%>%distinct(cpc_level12)
+description<-description%>%left_join(cpc_text, by=c("cpc_level12"="CPC"))%>%arrange(cpc_level12)
 bi <- balassa_index(
   data = productspace,
   country = "origin",
@@ -268,19 +473,33 @@ aggregated_products <- productspace %>%
 aggregated_products <- setNames(aggregated_products$count, aggregated_products$cpc_level12)
 V(net$network_product)$size <- aggregated_products[match(V(net$network_product)$name, names(aggregated_products))]
 
+
+V(net$network_product)$name2 <- description$area
 set.seed(200100)
+#New product space with colored nodes
 
-g_products <- net$network_product %>%
-  ggraph(layout = "kk") +
+colored_space<-ggraph(net$network_product, layout = "kk") +
   # geom_edge_link(aes(edge_width = weight), edge_colour = "#a8a8a8") +
-  geom_edge_link(edge_colour = "#888888") +
-  geom_node_point(aes(size = size), color = "#24b619") +
+  geom_edge_link(edge_colour = "#a8a8a8") +
+  geom_node_point(aes(size = size,color = factor(unlist(name2))), show.legend= T)+
+   #geom_node_text(aes(label = name2), size = 2, vjust = 2.2) +
+  ggtitle("Product Space with Main CPC Sectors, proximity tolerance=0.2")+
+  theme_void()+
+   theme(legend.position = "left")+
+  labs(col="Area")+
+  scale_color_manual(values=c("adaptation"="#82858A","mitigation"="#FFC100","CCS"="#00FFF3", "ICT"="#FF00F0", "energy"="#00FF3E", "production"="#FF000C", "transport"="#030303", "water"="#035DFA"))+
   geom_node_text(aes(label = name), size=2.5, vjust = 2.2)+
-  theme_void()
+  labs(size="Number of Intl. Patent Families")
 
-g_products
+colored_space
+
 #save it with width=2000, height=1242
 ```
+
+
+
+
+
 
 12. make the product space (0.05 tolerance)
 ```{r}
@@ -310,18 +529,24 @@ aggregated_products <- productspace %>%
 
 aggregated_products <- setNames(aggregated_products$count, aggregated_products$cpc_level12)
 V(net$network_product)$size <- aggregated_products[match(V(net$network_product)$name, names(aggregated_products))]
+V(net$network_product)$name2 <- description$area
 
 set.seed(200100)
 
-g_products <- net$network_product %>%
-  ggraph(layout = "kk") +
+colored_space005<-ggraph(net$network_product, layout = "kk") +
   # geom_edge_link(aes(edge_width = weight), edge_colour = "#a8a8a8") +
-  geom_edge_link(edge_colour = "#888888") +
-  geom_node_point(aes(size = size), color = "#24b619") +
-  geom_node_text(aes(label = name), size=2.5, vjust = 2.2) +
-  theme_void()
+  geom_edge_link(edge_colour = "#a8a8a8") +
+  geom_node_point(aes(size = size,color = factor(unlist(name2))), show.legend= T)+
+   #geom_node_text(aes(label = name2), size = 2, vjust = 2.2) +
+  ggtitle("Product Space with Main CPC Sectors, proximity tolerance =0.05")+
+  theme_void()+
+   theme(legend.position = "left")+
+  labs(col="Area")+
+  scale_color_manual(values=c("adaptation"="#82858A","mitigation"="#FFC100","CCS"="#00FFF3", "ICT"="#FF00F0", "energy"="#00FF3E", "production"="#FF000C", "transport"="#030303", "water"="#035DFA"))+
+  geom_node_text(aes(label = name), size=2.5, vjust = 2.2)+
+  labs(size="Number of Intl. Patent Families")
 
-g_products
+colored_space005
 
 ```
 
